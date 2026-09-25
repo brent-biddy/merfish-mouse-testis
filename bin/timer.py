@@ -4,8 +4,7 @@ import os
 import threading
 import time
 
-# Module-level list accumulates measurements across all timer calls within a notebook
-# execution. Persists for the lifetime of the Jupyter kernel.
+# Never reset: one process is one step, so this holds that step's whole run.
 _timings = []
 
 # vram is None for a step that never touched a GPU, which is most of them.

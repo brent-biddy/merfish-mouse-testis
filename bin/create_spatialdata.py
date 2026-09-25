@@ -5,15 +5,13 @@ create_spatialdata.py - Convert a Vizgen MERSCOPE output directory to a SpatialD
 Reads a MERSCOPE region directory (cell_by_gene.csv, cell_metadata.csv, the
 cell boundaries, the detected transcripts, and the mosaic images) and writes it
 out as a SpatialData Zarr store. No cells or genes are filtered here; filtering
-happens in later steps.
+happens in later steps, which read the store rather than the MERSCOPE directory.
 
 Boundaries written as a pre-VPT cell_boundaries/ directory of per-FOV HDF5 files
 are converted to the cell_boundaries.parquet the reader expects; a region with
 neither is an error rather than a store with no polygons in it.
 
-Later steps read the Zarr store rather than the MERSCOPE directory.
-
-Writes <outdir>/<sample>.zarr plus a timing TSV.
+Writes <outdir>/<sample>.create_spatialdata.zarr plus a timing TSV.
 
 Usage:
     create_spatialdata.py --sample testis_01 \\
@@ -32,23 +30,21 @@ from spatialdata_io import merscope
 
 from timer import timer, timing_summary
 
-# The function default, pinned here and recorded into the table below so downstream
-# steps read which plane was loaded instead of assuming it.
+# merscope()'s z_layers default, pinned so a library change cannot move the plane silently.
+# It selects the image alone: one per-stain mosaic TIFF set, read into the element
+# <slide>_<region>_z<n>. Recorded into the table below as provenance; nothing reads it back.
 Z_LAYER = 3
 
-# The plane the HDF5 conversion below writes. merscope() keeps only ZIndex 0 out of
-# whatever the boundary file holds, so converting the other planes would write several
-# times the polygons for values no reader ever sees.
+# The plane the HDF5 conversion reads, and the ZIndex it stamps on the parquet. Not a
+# merscope() argument: its reader keeps only ZIndex 0 -- undocumented, in _get_polygons --
+# so any other value converts cleanly, loses every polygon, and dies in pandas.
 BOUNDARY_Z_INDEX = 0
 
 
 def convert_hdf5_boundaries(boundaries_dir, output_path):
     """Write per-FOV HDF5 cell boundaries as the single parquet merscope() reads.
 
-    Pre-VPT MERSCOPE runs write cell_boundaries/feature_data_<fov>.hdf5 rather than a
-    cell_boundaries.parquet. merscope() looks only for the parquet: when it is absent it
-    warns, loads no polygons at all, and still names the polygons element as the table's
-    region — a store that reads fine until something asks for the boundaries.
+    Pre-VPT MERSCOPE runs write cell_boundaries/feature_data_<fov>.hdf5 instead.
     """
     entity_ids = []
     geometries = []
@@ -60,9 +56,10 @@ def convert_hdf5_boundaries(boundaries_dir, output_path):
                 if plane is None:
                     continue
 
-                # A cell segmented into several pieces on this plane has p_0, p_1, ... and
-                # a cell absent from it has none. Fewer than three vertices is not a ring;
-                # shapely raises on those rather than returning something invalid.
+                # A cell segmented into several pieces on this plane has p_0, p_1, ..., so
+                # parts become one MultiPolygon. Under three vertices cannot close into a
+                # ring, and shapely raises on one or two of them; a cell left with no parts
+                # at all is skipped.
                 parts = []
                 for part in plane.values():
                     coordinates = part["coordinates"][0]
@@ -76,8 +73,9 @@ def convert_hdf5_boundaries(boundaries_dir, output_path):
                 # on every row, and a bare Polygon has no .geoms.
                 geometries.append(MultiPolygon(parts))
 
-    # EntityID as string, not the int64 a VPT parquet uses: these ids run to 39 digits.
-    # merscope() takes the index from str(EntityID), so both formats land the same.
+    # The HDF5 group names are already strings, so they are left alone rather than cast to
+    # the int64 a VPT parquet holds: merscope() indexes on str(EntityID), so both land the
+    # same.
     boundaries = gpd.GeoDataFrame(
         {"EntityID": entity_ids, "ZIndex": BOUNDARY_Z_INDEX, "Geometry": geometries},
         geometry="Geometry",
@@ -96,11 +94,12 @@ def staged_region_dir(region_dir, staging_dir):
     instead of the parquet merscope() reads. Returns the input unchanged when neither
     applies.
     """
-    # Only the ids are needed, and cell_by_gene.csv is hundreds of MB of counts.
+    # Only the ids are needed; usecols keeps the whole counts matrix out of memory.
+    # dtype={0: str} rather than dtype=str: a scalar dtype does not reach index_col.
     counts_index = pd.read_csv(
-        region_dir / "cell_by_gene.csv", index_col=0, usecols=[0], dtype=str
+        region_dir / "cell_by_gene.csv", index_col=0, usecols=[0], dtype={0: str}
     ).index
-    metadata = pd.read_csv(region_dir / "cell_metadata.csv", index_col=0, dtype=str)
+    metadata = pd.read_csv(region_dir / "cell_metadata.csv", index_col=0, dtype={0: str})
     reorder = not counts_index.equals(metadata.index)
 
     parquet = region_dir / "cell_boundaries.parquet"
@@ -126,9 +125,11 @@ def staged_region_dir(region_dir, staging_dir):
         replaced.add(hdf5_dir.name)
     for entry in region_dir.iterdir():
         if entry.name not in replaced:
+            # Replaced rather than skipped: exists() follows the link, so one left by an
+            # earlier run pointing somewhere gone reads as absent and symlink_to then fails.
             link = staging_dir / entry.name
-            if not link.exists():
-                link.symlink_to(entry.resolve())
+            link.unlink(missing_ok=True)
+            link.symlink_to(entry.resolve())
 
     if reorder:
         print(f"Reordering cell_metadata.csv to match cell_by_gene.csv ({len(counts_index):,} cells).")
@@ -146,12 +147,20 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Convert a Vizgen MERSCOPE output directory to a SpatialData Zarr store"
     )
-    parser.add_argument("--sample", required=True, help="Sample identifier")
-    parser.add_argument("--path", required=True, help="MERSCOPE region output directory")
+    parser.add_argument(
+        "--sample",
+        required=True,
+        help="Sample identifier",
+    )
+    parser.add_argument(
+        "--path",
+        required=True,
+        help="MERSCOPE region output directory",
+    )
     parser.add_argument(
         "--outdir",
         default=".",
-        help="Directory to write <sample>.zarr into (default: current directory)",
+        help="Directory to write <sample>.create_spatialdata.zarr into (default: current directory)",
     )
     return parser.parse_args()
 
@@ -161,7 +170,7 @@ def main():
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    output_path = outdir / f"{args.sample}.zarr"
+    output_path = outdir / f"{args.sample}.create_spatialdata.zarr"
 
     print(f"Sample:  {args.sample}")
     print(f"Input:   {args.path}")
@@ -169,13 +178,12 @@ def main():
     print(f"Z-layer: {Z_LAYER}")
 
     raw_region_dir = Path(args.path)
-    region_dir = staged_region_dir(raw_region_dir, outdir / "staged_region")
+    region_dir = staged_region_dir(raw_region_dir, outdir / "staged" / raw_region_dir.name)
 
     # Elements are named <slide>_<region>_<element>. Both halves are passed rather than
-    # defaulted: the slide would otherwise be the run directory's name, and the region the
-    # name of whatever directory was read — which is the staging directory for a sample
-    # that needed one. Naming the raw region keeps a staged sample's elements identical to
-    # what the same data would produce read directly.
+    # defaulted: merscope() takes the slide from the parent directory's name and the region
+    # from the directory it read, so defaulting would let the names follow wherever the
+    # files sit. Passing them keeps a staged sample's elements identical to a direct read.
     with timer("Read MERSCOPE"):
         sdata = merscope(
             path=region_dir,
@@ -194,8 +202,8 @@ def main():
     for name in sdata.points:
         print(f"  points  {name}")
 
-    # Record the sample id in the object; the workflow stages files under indexed names,
-    # so the filename is not a reliable source for it downstream.
+    # Record the sample id in the object: every later step and the report read it from
+    # there rather than parsing a staged filename.
     for name, table in sdata.tables.items():
         table.obs["sample"] = args.sample
         table.uns["z_layer"] = Z_LAYER

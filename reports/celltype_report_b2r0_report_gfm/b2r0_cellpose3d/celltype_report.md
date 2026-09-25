@@ -1,30 +1,16 @@
----
-title: "MERFISH testis — cell type annotation"
-subtitle: "One section per sample: clusters, per-cell calls, and what they compose to"
-author: "Brent Biddy"
-date: today
-format:
-  gfm:
-    fig-dpi: 144
-    toc: true
-    toc-depth: 1
-    filters:
-      - fold-code.lua      # code folding, which quarto only does for HTML
-  pptx:
-    fig-dpi: 200
-    slide-level: 2
-    echo: false
-    reference-doc: ouhsc_ppt_template.pptx
-execute:
-  warning: false
----
+# MERFISH testis — cell type annotation
+Brent Biddy
+2026-09-25
 
-::: {.content-hidden when-format="pptx"}
+- [Setup](#setup)
+- [b2r0_cellpose3d](#b2r0_cellpose3d)
 
 # Setup
 
-```{python}
-# | tags: [setup]
+<details>
+<summary>Code</summary>
+
+``` python
 import traceback
 from pathlib import Path
 
@@ -109,9 +95,14 @@ if not CENTROIDS:
     raise FileNotFoundError("No *.centroids.h5ad staged next to the notebook.")
 ```
 
+</details>
+
 ## Drawing primitives
 
-```{python}
+<details>
+<summary>Code</summary>
+
+``` python
 def heatmap(ax, frame, cmap="viridis", vmin=None, vmax=None, fmt="{:.2f}"):
     """A labelled matrix, rows and columns taken from the frame's own index."""
     values = frame.to_numpy()
@@ -154,12 +145,17 @@ def markdown_table(frame):
     return "\n".join([header, rule] + rows)
 ```
 
+</details>
+
 ## Slides
 
-Each function emits its heading, its caption and its figure, and does no work on the data
-beyond what it draws.
+Each function emits its heading, its caption and its figure, and does no
+work on the data beyond what it draws.
 
-```{python}
+<details>
+<summary>Code</summary>
+
+``` python
 def qc_sample_slide(adata, sample):
     display(Markdown("## QC metrics"))
     display(Markdown(
@@ -555,9 +551,12 @@ def annotation_table_slide(summary):
     display(Markdown(markdown_table(summary)))
 ```
 
-:::
+</details>
 
-```{python}
+<details>
+<summary>Code</summary>
+
+``` python
 for path in ZARRS:
     # ── read one sample, with the counts matrix left on disk ──────────────────────────
     # Its own try: a store that will not open has no sample id to head its section with.
@@ -726,3 +725,250 @@ for path in ZARRS:
 
     del adata
 ```
+
+</details>
+
+# b2r0_cellpose3d
+
+## QC metrics
+
+The sample as a whole. Each panel is one per-cell metric drawn as a
+violin over every cell, with the box inside marking the quartiles and
+the median. Transcripts and cell volume are on log axes; they span
+orders of magnitude, where genes detected is capped by the panel. These
+are the cells that survived the filter in step 2, not the raw
+segmentation.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-4.png)
+
+## Clusters on the UMAP
+
+Each point is a cell in UMAP space, coloured by its cluster at
+resolution 1. Clusters are numbered by size, so cluster 1 is the
+largest.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-7.png)
+
+## Cluster similarity
+
+Spearman correlation between each pair of cluster centroids, over the
+panel’s genes. The same matrix is drawn twice, both panels in the
+dendrogram order it defines. On the left the clusters keep their
+size-rank numbers, so they are not in numerical order; on the right the
+same clusters are renumbered along the order they now sit in. A position
+means the same cluster in both, so reading one against the other gives
+the mapping.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-10.png)
+
+## QC metrics by cluster
+
+Per-cell QC across the clusters, in v2 order. A cluster that correlates
+cleanly with a cell type but carries very few transcripts or genes is
+contamination rather than that type.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-13.png)
+
+## Per-cell calls on the UMAP
+
+Every cell coloured by the reference cell type it correlates with most
+strongly. This is a call per cell, made without reference to the
+clustering, so a cluster of one colour is agreement between two
+independent views of the data.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-16.png)
+
+## Correlation on the UMAP
+
+One panel per reference cell type, each cell coloured by how strongly it
+correlates with that type. Values are standardized within each cell, so
+a panel shows preference rather than how many genes a cell captured.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-19.png)
+
+## Correlation by cluster
+
+The per-cell correlations averaged over each cluster, drawn three ways:
+the mean as it stands, scaled across each row, and scaled down each
+column. The values are standardized per cell upstream, so the first
+panel is a mean z rather than a mean correlation, and is comparable down
+a column as well as across a row. Columns are ordered so each cluster’s
+best match falls on the diagonal.
+
+**Only the row scaling is a call.** A column’s brightest square is the
+best home for that cell type whether or not the type is present at all.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-22.png)
+
+## Call composition by cluster
+
+The share of each cluster’s cells whose own best match was each cell
+type, so a row sums to one. A boxed square took at least 70% of its
+cluster and settles it; a cluster with no boxed square is starred and
+called Ambiguous.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-25.png)
+
+## Cell type calls on the UMAP
+
+The calls the composition heatmap implies. A cluster that concentrated
+on one cell type takes it; one that did not is Ambiguous, in grey,
+rather than named on a split vote.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-28.png)
+
+## Cell types on the tissue
+
+The same calls in tissue coordinates, drawn as the segmented cell
+boundaries rather than as points. Testis cell types are radially
+organised within the seminiferous tubule, so a correct annotation shows
+structure here and a wrong one shows noise. This is the check the
+embedding cannot give.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-31.png)
+
+## Flagged clusters on the UMAP
+
+The clusters the composition could not settle, each against the rest of
+the sample in grey.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-34.png)
+
+## Resolving cluster 16
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-37.png)
+
+## Resolving cluster 14
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-40.png)
+
+## Resolving cluster 18
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-43.png)
+
+## Resolving cluster 11
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-46.png)
+
+## Resolving cluster 13
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-49.png)
+
+## Resolving cluster 15
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-52.png)
+
+## Resolving cluster 19
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-55.png)
+
+## Resolving cluster 6
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-58.png)
+
+## Resolving cluster 12
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-61.png)
+
+## Resolving cluster 1
+
+On the left the cluster’s cells on the embedding, coloured by their own
+per-cell call. On the right the same cells placed by their correlation
+with the two types most of them call, with the diagonal marking where a
+cell correlates equally with both: two arms off it is two populations,
+one cloud straddling it is one. Along the bottom, each QC metric against
+the rest of the sample.
+
+![](celltype_report_files/figure-commonmark/cell-5-output-64.png)
+
+## Cluster annotation summary
+
+One row per cluster: its size, the cell type the composition settled on,
+the share that type took, and the runner-up. `margin` is how far the
+winner sits above the runner-up. Nothing is filtered on it — it is
+reported so a thin call can be spotted.
+
+| cluster_v1 | cluster_v2 | n_cells | call | top1 | share | top2 | margin | flagged |
+|----|----|----|----|----|----|----|----|----|
+| 16 | 1 | 4,544 | Ambiguous | Myoid | 0.478 | ImmLeydig | 0.236 | \* |
+| 14 | 2 | 5,223 | Ambiguous | ImmLeydig | 0.351 | f-Pericyte | 0.108 | \* |
+| 18 | 3 | 2,312 | Ambiguous | Endothelial | 0.443 | f-Pericyte | 0.176 | \* |
+| 17 | 4 | 3,794 | Spermatogonia | Spermatogonia | 0.709 | Spermatocyte | 0.593 |  |
+| 11 | 5 | 6,721 | Ambiguous | Spermatogonia | 0.485 | Spermatocyte | 0.261 | \* |
+| 13 | 6 | 5,933 | Ambiguous | ImmLeydig | 0.260 | f-Pericyte | 0.043 | \* |
+| 8 | 7 | 7,647 | Spermatocyte | Spermatocyte | 0.726 | Spermatogonia | 0.527 |  |
+| 5 | 8 | 11,478 | Spermatocyte | Spermatocyte | 0.789 | Elongating | 0.714 |  |
+| 3 | 9 | 12,247 | Spermatocyte | Spermatocyte | 0.780 | Elongating | 0.636 |  |
+| 10 | 10 | 6,951 | Spermatocyte | Spermatocyte | 0.866 | Elongating | 0.771 |  |
+| 15 | 11 | 4,962 | Ambiguous | RoundSpermatid | 0.461 | Elongating | 0.112 | \* |
+| 19 | 12 | 1,071 | Ambiguous | Spermatocyte | 0.531 | RoundSpermatid | 0.201 | \* |
+| 7 | 13 | 8,184 | Spermatocyte | Spermatocyte | 0.955 | RoundSpermatid | 0.920 |  |
+| 9 | 14 | 7,306 | Spermatocyte | Spermatocyte | 0.707 | RoundSpermatid | 0.430 |  |
+| 2 | 15 | 13,044 | RoundSpermatid | RoundSpermatid | 0.784 | Spermatocyte | 0.660 |  |
+| 6 | 16 | 10,580 | Ambiguous | Elongating | 0.527 | RoundSpermatid | 0.059 | \* |
+| 12 | 17 | 6,378 | Ambiguous | Elongating | 0.632 | RoundSpermatid | 0.266 | \* |
+| 1 | 18 | 17,308 | Ambiguous | Elongating | 0.567 | RoundSpermatid | 0.134 | \* |
+| 4 | 19 | 11,685 | Elongating | Elongating | 0.713 | RoundSpermatid | 0.507 |  |

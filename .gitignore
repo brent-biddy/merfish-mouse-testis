@@ -4,11 +4,8 @@ results/
 results_*/
 work/
 
-# Everything rendered lands in reports/, or in notebooks/ when rendered in place. The
-# markdown and the figures beside it are committed, being the copy GitHub renders; the
-# deck is not, being the same content in a format git has nothing useful to say about.
-# Rebuild it by rendering. Scoped to where a render lands, so the template these are
-# rendered from is committed by being an input rather than by an exception.
+# The markdown and its figures are committed, being the copy GitHub renders; the deck is
+# not, git having nothing useful to say about it. Rebuild it by rendering.
 reports/**/*.pptx
 notebooks/**/*.pptx
 
@@ -21,8 +18,7 @@ assets/reference/*.xlsx
 # Quarto / Jupyter
 *.quarto_ipynb
 .quarto/
-# Scoped to notebooks/, where rendering in place leaves one. The identically named
-# directory under reports/ holds the figures a committed document links to.
+# Scoped to notebooks/: the same-named directory under reports/ holds committed figures.
 notebooks/**/*_files/
 .ipynb_checkpoints/
 

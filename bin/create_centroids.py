@@ -8,16 +8,15 @@ instead of one per cell:
     X                 each cell's CP10K profile, summed over the group
     layers["counts"]  raw counts, summed over the group
 
-Stored as sums rather than means because sums are additive: the profile of any union of
-clusters is the row-wise sum of its members, and n_cells sums with it. The reference
-centroids in assets/reference are ln(mean + 1), so the comparable value built from this
-store is log1p(X / n_cells).
+Stored as sums, not means, so clusters pool: any union's profile is the row-wise sum of
+its members, and n_cells sums with it. The reference centroids in assets/reference are
+ln(mean + 1), so the comparable value here is log1p(X / n_cells).
 
 Groups by every _v1 column by default, or by one named obs column with --group_by.
 Requires layers["counts"], which cluster_spatialdata_gpu.py writes.
 
 Writes <outdir>/<sample>.centroids.h5ad plus a timing TSV, or
-<outdir>/<sample>.centroids_<column>.* for a --group_by run, so the two can sit side
+<outdir>/<sample>.<column>.centroids.* for a --group_by run, so the two can sit side
 by side.
 
 Usage:
@@ -41,9 +40,15 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Build per-cluster centroids from a clustered SpatialData zarr"
     )
-    parser.add_argument("--sample", required=True, help="Sample identifier")
     parser.add_argument(
-        "--path", required=True, help="Clustered SpatialData zarr from cluster_spatialdata_gpu"
+        "--sample",
+        required=True,
+        help="Sample identifier",
+    )
+    parser.add_argument(
+        "--path",
+        required=True,
+        help="Clustered SpatialData zarr from cluster_spatialdata_gpu",
     )
     parser.add_argument(
         "--outdir",
@@ -74,6 +79,7 @@ def get_centroids(adata, column):
     out.obs["grouping"] = column
     out.obs["group"] = out.obs_names
     out.obs["n_cells"] = cp10k.obs["n_obs_aggregated"].to_numpy()
+    out.obs_names = [f"{column}_{group}" for group in out.obs["group"]]
 
     return out
 
@@ -106,8 +112,10 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # A --group_by run publishes beside a sweep run, so the column goes in the name.
-    stem = f"{args.sample}.centroids_{args.group_by}" if args.group_by else f"{args.sample}.centroids"
+    # A --group_by run publishes beside a sweep run, so the column goes in the
+    # name: <sample>.<column>.centroids, not <sample>.centroids.<column>, so one
+    # glob takes both.
+    stem = f"{args.sample}.{args.group_by}.centroids" if args.group_by else f"{args.sample}.centroids"
     output_path = outdir / f"{stem}.h5ad"
 
     print(f"Sample:  {args.sample}")
@@ -145,18 +153,15 @@ def main():
             centroid_list.append(get_centroids(adata, column))
 
     with timer("Assemble"):
-        # index_unique=None keeps the group labels unsuffixed; obs identifies a row by
-        # (grouping, group). anndata still wants unique names, hence the renumbering.
-        centroids = ad.concat(centroid_list, axis=0, join="outer", index_unique=None)
-        centroids.obs_names = [str(row) for row in range(centroids.n_obs)]
+        centroids = ad.concat(centroid_list, axis=0, join="outer")
         centroids.obs["sample"] = args.sample
 
-        # Pinned, because anndata converts string columns to categorical only when the
-        # cardinality pays off, so the dtype would otherwise vary between stores.
+        # anndata leaves a string column as object only when every value is unique, so
+        # `group` varies: categorical from a sweep, object from a --group_by run.
         for column in ("grouping", "group", "sample"):
             centroids.obs[column] = pd.Categorical(centroids.obs[column].astype(str))
 
-    print(f"Wrote {centroids.n_obs:,} group rows x {centroids.n_vars:,} genes.")
+    print(f"Assembled {centroids.n_obs:,} group rows x {centroids.n_vars:,} genes.")
 
     with timer("Write h5ad"):
         centroids.write_h5ad(output_path)
