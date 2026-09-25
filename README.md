@@ -1,17 +1,18 @@
-# merfish_testis
+# merfish-mouse-testis
 
-Analysis of Vizgen MERSCOPE (MERFISH) data from human testis.
+Analysis of Vizgen MERSCOPE (MERFISH) data from mouse testis, annotated against a human
+reference atlas (genes matched case-insensitively across species).
 
 ## Setup
 
 There is no project-specific environment. Everything in `bin/` runs in a shared container,
-and `nextflow.config` names two: a CPU image for every step, and a GPU image for the
+and each `conf/<profile>.config` names two: a CPU image for every step, and a GPU image for the
 one process that declares `label 'gpu'`.
 
 ```bash
-apptainer exec oras://ghcr.io/brent-biddy/python_cpu-sif:1.0.0 bin/create_spatialdata.py --help
+apptainer exec oras://ghcr.io/brent-biddy/python_cpu-sif:1.0.2 bin/create_spatialdata.py --help
 
-apptainer exec oras://ghcr.io/brent-biddy/python_gpu-sif:1.0.1 bin/cluster_spatialdata_gpu.py --help
+apptainer exec oras://ghcr.io/brent-biddy/python_gpu-sif:1.0.2 bin/cluster_spatialdata_gpu.py --help
 ```
 
 Both are published as `oras://` artifacts, which are already SIFs, so a pull skips the
@@ -48,19 +49,22 @@ analysis rather than a usage error.
 
 ### Profiles
 
-The defaults apply unconditionally, from `nextflow.config` itself, and a profile states only
-its difference. There is deliberately no `standard` profile: Nextflow only auto-applies that
-when `-profile` is omitted entirely, so naming one would mean `-profile wsl` silently dropped
-the defaults with it.
+`nextflow.config` itself carries only what every site shares — params, `workDir`, the
+`--no-home`/`TMPDIR` containerOptions fix — and states no container, executor, or resource
+caps of its own. Every site-specific value, including which container each step runs in,
+lives in `conf/<profile>.config`. There is deliberately no `standard` profile: Nextflow only
+auto-applies that when `-profile` is omitted entirely, so naming one would mean `-profile wsl`
+silently dropped the defaults with it.
 
 | Invocation | What you get |
 |---|---|
-| *(none)* | local executor, the containers, no GPU access |
-| `-profile wsl` | the above, plus how a `label 'gpu'` process reaches a card under WSL2 |
+| *(none)* | no container configured — steps fail rather than silently running in the wrong image |
+| `-profile wsl` | local executor, the containers, how a `label 'gpu'` process reaches a card under WSL2 |
 | `-profile oscer` | SLURM, scratch and OURdisk paths, the GPU queue |
 
-The cost is worth knowing: forgetting `-profile oscer` on the cluster no longer fails — it
-runs everything on the login node.
+Forgetting `-profile` is therefore a hard failure, not a silent login-node run — the cost
+of that safety net was relying on `apptainer` config merging correctly between
+`nextflow.config` and the profile, which is now avoided entirely.
 
 Add `-stub` to check wiring without doing the work.
 
@@ -97,8 +101,8 @@ published location, not the work dir, so a step re-run from a sheet reads a file
 exists after the run that wrote it is gone.
 
 The work dir and the image cache stay out of the repo, being large, churny, and
-reproducible: under `~/merfish_testis_work/` by default, and
-`/scratch/$USER/merfish_testis_work/` on `oscer`. Scratch deletes files 14 days after they
+reproducible: under `~/merfish-mouse-testis_work/` by default, and
+`/scratch/$USER/merfish-mouse-testis_work/` on `oscer`. Scratch deletes files 14 days after they
 are created no matter how recently they were read, so nothing durable can live there — on
 `oscer` the image cache sits on OURdisk for that reason.
 
@@ -154,7 +158,7 @@ draw a tissue figure from, which is not a thing to discover in step 5.
 The script is a plain CLI and runs outside Nextflow unchanged:
 
 ```bash
-apptainer exec oras://ghcr.io/brent-biddy/python_cpu-sif:1.0.0 \
+apptainer exec oras://ghcr.io/brent-biddy/python_cpu-sif:1.0.2 \
     python bin/create_spatialdata.py \
         --sample testis_01 \
         --path data/raw/testis_01 \
@@ -234,7 +238,7 @@ forwarding the region unchanged and naming this step's output as the VPT directo
 
 This is the memory-hungriest step: the label raster is about 7 GB per plane and the step
 holds one plane, the counts and the traced polygons at once, measured at a peak near 20 GB.
-It has no override in `nextflow.config`, so on `oscer` it takes the retry ladder — 32 GB on
+It has no per-step override, so on `oscer` it takes the retry ladder — 32 GB on
 the first attempt and 32 GB more on each of the three retries — and locally it takes the
 16 GB default, which is not enough. It has never been run on `oscer`; the first run that
 does is worth recording the real peak from.
