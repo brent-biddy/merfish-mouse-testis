@@ -100,11 +100,12 @@ being one file per step rather than one per sample. A sheet's path column names 
 published location, not the work dir, so a step re-run from a sheet reads a file that still
 exists after the run that wrote it is gone.
 
-The work dir and the image cache stay out of the repo, being large, churny, and
-reproducible: under `~/merfish-mouse-testis_work/` by default, and
-`/scratch/$USER/merfish-mouse-testis_work/` on `oscer`. Scratch deletes files 14 days after they
-are created no matter how recently they were read, so nothing durable can live there — on
-`oscer` the image cache sits on OURdisk for that reason.
+The work dir sits beside `results/` in the repo, under `work/`, on every profile except
+`oscer` — there it moves to `/scratch/$USER/merfish-mouse-testis_work/`, since OSCER home has
+no room for it. The image cache always stays out of the repo, being large and reproducible:
+`~/apptainer_cache` by default, and a path on OURdisk under `oscer`. Scratch deletes files 14
+days after they are created no matter how recently they were read, so nothing durable can live
+there — on `oscer` the image cache sits on OURdisk for that reason.
 
 The work dir is dropped when a run succeeds, so `-resume` works after a failure and not
 after a success. Because runs never share an output directory, a `-stub` run cannot
@@ -522,6 +523,7 @@ notebooks/       report notebooks
 assets/          sample sheets, and the pptx template and lua filter a render needs
 assets/reference/  cell type centroids to annotate against; see each file's header
 data/raw/        raw instrument output (not committed)
+work/<run_id>/   Nextflow's scratch dir (not committed); moves to OSCER scratch under -profile oscer
 results/<run_id>/<sample>/<step>/    published step output (not committed)
 results/<run_id>/<step>_samplesheet.csv    the handoff sheet each step writes
 reports/README.md  hand-written index of the renders worth keeping
