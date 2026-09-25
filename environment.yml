@@ -1,7 +1,7 @@
 # A local env for developing this repo's scripts and notebooks. Versions match python_cpu
 # 1.0.0, the image the pipeline runs in -- do not re-solve. The GPU steps are not here; cupy
 # and rapids-singlecell come from python_gpu.
-name: merfish_testis
+name: merfish-mouse-testis
 
 channels:
   - conda-forge
