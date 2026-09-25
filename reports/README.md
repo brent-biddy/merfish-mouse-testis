@@ -23,7 +23,7 @@ would overwrite the part that matters. Add a row when you commit a report.
 
 | Report | Samples | Segmentation | What it was for |
 |--------|---------|--------------|-----------------|
-| | | | |
+| [celltype_report_b2r0_report](celltype_report_b2r0_report_gfm/b2r0_cellpose3d/celltype_report.md) | b2r0_cellpose3d | cellpose (lab's own 2023 pipeline, see `b2r0_cellpose3d` provenance) | First celltype report on a real sample, not the `u2os_test` fixture |
 
 <!-- Row format — the link points at the document inside the directory:
 | [celltype_report_cellpose_cmp](celltype_report_cellpose_cmp/celltype_report.md) | testis_01 | cellpose | Comparison against the Vizgen boundaries before settling on one |
