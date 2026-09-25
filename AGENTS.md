@@ -2,8 +2,9 @@
 
 Rules for working in this repository. Everything here is true because it was decided, not
 because of how the repo currently looks — **do not add anything that a refactor could
-falsify.** A list of the current steps belongs in `README.md`, which is read by people who
-will notice when it goes stale. This file is read by a tool that will not.
+falsify.** A list of the current steps belongs in `CLAUDE.md`, which is read by people
+working in this repo and will be noticed when it goes stale. This file is a stricter
+contract read by tooling, with no such feedback loop.
 
 ## The invariants
 
@@ -17,7 +18,7 @@ will notice when it goes stale. This file is read by a tool that will not.
    was used.
 4. **Per-stage parameters are declared in the script that applies them** and recorded into
    the output object. Downstream code reads them from the object; it does not restate them.
-5. **Adding or renaming a `bin/` script means updating the workflow table in `README.md` in
+5. **Adding or renaming a `bin/` script means updating the workflow table in `CLAUDE.md` in
    the same commit.** That table is the ordering contract — there are no numeric filename
    prefixes to fall back on.
 6. **The pipeline layer is additive.** Adding `modules/*.nf` must never require editing a
