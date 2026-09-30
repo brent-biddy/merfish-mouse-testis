@@ -137,8 +137,9 @@ on is `sample, zarr_store, table_path`, with `zarr_store` forwarded unchanged.
 The two are rejoined only where both are needed: in the report, and in
 `export_spatialdata` when one object is wanted to share. The table names the shapes
 element it annotates (`uns["spatialdata_attrs"]["region"]`), and that is how a table is
-matched to its store. Both check it, because SpatialData accepts a table whose shapes are
-missing without an error or a warning.
+matched to its store. Both check it: SpatialData only warns when an object is built or
+read with a table whose shapes are missing, and says nothing when a table is assigned to an
+object already open, which is how both rejoin them.
 
 Steps run in this order. This table is the ordering contract — there are no numeric
 filename prefixes.

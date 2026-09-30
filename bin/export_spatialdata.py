@@ -8,9 +8,10 @@ self-contained store, for sharing or for a tool that opens a SpatialData directl
 the only step after create_spatialdata that copies the images, so run it when a single
 object is wanted rather than as part of every analysis.
 
-The table names the shapes element it annotates, and SpatialData accepts a table whose
-element is missing without error or warning -- so that is checked here, as is that the
-table's sample is the one asked for.
+The table names the shapes element it annotates. SpatialData only warns when an object is
+built or read with a table whose element is missing, and says nothing when the table is
+assigned to an object already open, as here -- so that is checked, as is that the table's
+sample is the one asked for.
 
 Writes <outdir>/<sample>.export_spatialdata.zarr plus a timing TSV.
 

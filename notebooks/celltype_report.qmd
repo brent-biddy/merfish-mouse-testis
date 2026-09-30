@@ -597,9 +597,9 @@ for path in TABLES:
     display(Markdown(f"# {sample}"))
 
     try:
-        # Only the shapes, which come into memory, as outlines need. SpatialData would pair
-        # a table with a store lacking its shapes without a word, hence the check. More
-        # boundaries than cells -- the clustering filter dropped some.
+        # Only the shapes, which come into memory, as outlines need. The table is never put
+        # into a SpatialData object here, so nothing but this check would notice a store that
+        # lacks its shapes. More boundaries than cells -- the clustering filter dropped some.
         region = adata.uns["spatialdata_attrs"]["region"]
         if region not in STORE_OF:
             raise FileNotFoundError(
