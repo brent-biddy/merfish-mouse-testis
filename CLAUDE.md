@@ -262,7 +262,7 @@ forwarding the region unchanged and naming this step's output as the VPT directo
 
 This is the memory-hungriest step: the label raster is about 7 GB per plane and the step
 holds one plane, the counts and the traced polygons at once, measured at a peak near 20 GB.
-It has no per-step override, so on `oscer` it takes the retry ladder — 32 GB on
+It has no per-step override, so on `oscer` it takes the retry ladder — 48 GB on
 the first attempt and 32 GB more on each of the three retries — and locally it takes the
 16 GB default, which is not enough. It has never been run on `oscer`; the first run that
 does is worth recording the real peak from.
