@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-create_centroids.py - Build per-cluster centroids from a clustered SpatialData zarr.
+create_centroids.py - Build per-cluster centroids from a clustered SpatialData table.
 
 Sums both expression layers over an obs column, writing one row per group of cells
 instead of one per cell:
@@ -21,7 +21,7 @@ by side.
 
 Usage:
     create_centroids.py --sample testis_01 \\
-        --path results/testis_01/cluster_spatialdata_gpu/testis_01.zarr \\
+        --table_path results/testis_01/cluster_spatialdata_gpu/testis_01.cluster_spatialdata_gpu.h5ad \\
         --outdir results/testis_01/create_centroids
 """
 
@@ -31,14 +31,13 @@ from pathlib import Path
 import anndata as ad
 import pandas as pd
 import scanpy as sc
-import spatialdata
 
 from timer import timer, timing_summary
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Build per-cluster centroids from a clustered SpatialData zarr"
+        description="Build per-cluster centroids from a clustered SpatialData table"
     )
     parser.add_argument(
         "--sample",
@@ -46,9 +45,9 @@ def parse_args():
         help="Sample identifier",
     )
     parser.add_argument(
-        "--path",
+        "--table_path",
         required=True,
-        help="Clustered SpatialData zarr from cluster_spatialdata_gpu",
+        help="Clustered table .h5ad from cluster_spatialdata_gpu or annotate_celltypes",
     )
     parser.add_argument(
         "--outdir",
@@ -100,7 +99,7 @@ def get_grouping_columns(adata, group_by):
     columns = [column for column in adata.obs if column.endswith("_v1")]
     if not columns:
         raise ValueError(
-            f"no _v1 columns in obs — was this zarr written by cluster_spatialdata_gpu? "
+            f"no _v1 columns in obs — was this table written by cluster_spatialdata_gpu? "
             f"Found: {sorted(adata.obs.columns)}"
         )
     return columns
@@ -119,15 +118,12 @@ def main():
     output_path = outdir / f"{stem}.h5ad"
 
     print(f"Sample:  {args.sample}")
-    print(f"Input:   {args.path}")
+    print(f"Input:   {args.table_path}")
     print(f"Output:  {output_path}")
     print(f"Group:   {args.group_by or 'leiden sweep'}")
 
-    with timer("Read zarr"):
-        sdata = spatialdata.read_zarr(args.path)
-
-    with timer("Extract table"):
-        adata = sdata.tables["table"]
+    with timer("Read table"):
+        adata = ad.read_h5ad(args.table_path)
 
     print(f"Table:   {adata.n_obs:,} cells x {adata.n_vars:,} genes")
 

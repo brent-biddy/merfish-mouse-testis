@@ -8,11 +8,13 @@ Spearman-correlates each cell's profile with each cell type in a reference centr
     obs["corr_<cell type>"]     standardized correlation, one column per cell type
     obs["cell_type_per_cell"]   the cell type a cell correlates with most strongly
 
-Writes <outdir>/<sample>.annotate_celltypes.zarr, a gene overlap TSV, and a timing TSV.
+Reads and writes only the table, never the store its images and boundaries are in.
+
+Writes <outdir>/<sample>.annotate_celltypes.h5ad, a gene overlap TSV, and a timing TSV.
 
 Usage:
     annotate_celltypes.py --sample testis_01 \\
-        --path results/testis_01/cluster_spatialdata_gpu/testis_01.zarr \\
+        --table_path results/testis_01/cluster_spatialdata_gpu/testis_01.cluster_spatialdata_gpu.h5ad \\
         --reference assets/reference/shami_human_testis_centroids.csv.gz \\
         --outdir results/testis_01/annotate_celltypes
 """
@@ -20,9 +22,9 @@ Usage:
 import argparse
 from pathlib import Path
 
+import anndata as ad
 import numpy as np
 import pandas as pd
-import spatialdata
 from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
@@ -39,9 +41,9 @@ def parse_args():
         help="Sample identifier",
     )
     parser.add_argument(
-        "--path",
+        "--table_path",
         required=True,
-        help="Clustered SpatialData zarr from cluster_spatialdata_gpu",
+        help="Clustered table .h5ad from cluster_spatialdata_gpu",
     )
     parser.add_argument(
         "--reference",
@@ -51,7 +53,7 @@ def parse_args():
     parser.add_argument(
         "--outdir",
         default=".",
-        help="Directory to write <sample>.annotate_celltypes.zarr into (default: current directory)",
+        help="Directory to write <sample>.annotate_celltypes.h5ad into (default: current directory)",
     )
     return parser.parse_args()
 
@@ -61,10 +63,10 @@ def main():
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    output_path = outdir / f"{args.sample}.annotate_celltypes.zarr"
+    output_path = outdir / f"{args.sample}.annotate_celltypes.h5ad"
 
     print(f"Sample:    {args.sample}")
-    print(f"Input:     {args.path}")
+    print(f"Input:     {args.table_path}")
     print(f"Reference: {args.reference}")
     print(f"Output:    {output_path}")
 
@@ -80,11 +82,8 @@ def main():
 
     print(f"Reference: {reference.shape[0]:,} genes x {reference.shape[1]} cell types")
 
-    with timer("Read zarr"):
-        sdata = spatialdata.read_zarr(args.path)
-
-    with timer("Extract table"):
-        adata = sdata.tables["table"]
+    with timer("Read table"):
+        adata = ad.read_h5ad(args.table_path)
 
     print(f"Table:     {adata.n_obs:,} cells x {adata.n_vars:,} genes")
 
@@ -133,8 +132,8 @@ def main():
     print("\nPer-cell calls:")
     print(adata.obs["cell_type_per_cell"].value_counts().to_string())
 
-    with timer("Write zarr"):
-        sdata.write(output_path, overwrite=True)
+    with timer("Write table"):
+        adata.write_h5ad(output_path)
 
     timing_summary(outdir / f"{args.sample}.annotate_celltypes.timing.tsv")
 

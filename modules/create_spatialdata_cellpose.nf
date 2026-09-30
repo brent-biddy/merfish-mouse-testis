@@ -10,7 +10,8 @@ process CREATE_SPATIALDATA_CELLPOSE {
     path 'timer.py'
 
     output:
-    tuple val(sample), path("${sample}.create_spatialdata_cellpose.zarr"), emit: zarr
+    tuple val(sample), path("${sample}.create_spatialdata_cellpose.zarr"),
+          path("${sample}.create_spatialdata_cellpose.h5ad"), emit: sdata
     path "${sample}.create_spatialdata_cellpose.timing.tsv", emit: timings
 
     script:
@@ -22,6 +23,7 @@ process CREATE_SPATIALDATA_CELLPOSE {
     stub:
     """
     mkdir -p ${sample}.create_spatialdata_cellpose.zarr
+    touch ${sample}.create_spatialdata_cellpose.h5ad
     touch ${sample}.create_spatialdata_cellpose.timing.tsv
     """
 }
@@ -36,13 +38,14 @@ workflow create_spatialdata_cellpose {
 
     CREATE_SPATIALDATA_CELLPOSE(ch_region_dirs, file("${projectDir}/bin/timer.py"))
 
-    CREATE_SPATIALDATA_CELLPOSE.out.zarr
-        .map { sample, zarr ->
-            "${sample},${params.outdir}/${sample}/create_spatialdata_cellpose/${zarr.name}"
+    CREATE_SPATIALDATA_CELLPOSE.out.sdata
+        .map { sample, zarr_store, table ->
+            def published = "${params.outdir}/${sample}/create_spatialdata_cellpose"
+            "${sample},${published}/${zarr_store.name},${published}/${table.name}"
         }
         .collectFile(name: 'create_spatialdata_cellpose_samplesheet.csv', storeDir: params.outdir,
-                     seed: 'sample,path', newLine: true, sort: true)
+                     seed: 'sample,zarr_store,table_path', newLine: true, sort: true)
 
     emit:
-    zarr = CREATE_SPATIALDATA_CELLPOSE.out.zarr
+    sdata = CREATE_SPATIALDATA_CELLPOSE.out.sdata // tuple(sample, zarr_store, table)
 }

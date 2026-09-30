@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-cluster_spatialdata_gpu.py - GPU-accelerated QC, normalize, and cluster a SpatialData zarr.
+cluster_spatialdata_gpu.py - GPU-accelerated QC, normalize, and cluster a SpatialData table.
 
 Uses rapids-singlecell for the compute-heavy steps (filtering, normalization, PCA,
 neighbors, UMAP, and a sweep of Leiden clusterings). Data is moved back to CPU before
-zarr I/O.
+it is written.
+
+Reads and writes only the table. The images, transcripts and boundaries stay in the store
+create_spatialdata wrote, which this step never opens.
 
 There is no highly-variable-gene selection: a MERFISH panel is a few hundred curated
 markers, so every gene is used.
@@ -12,19 +15,19 @@ markers, so every gene is used.
 Each swept resolution leaves two obs columns, e.g. leiden_res_0.10_v0 and leiden_res_0.10_v1.
 v1 is the size ranking and is what downstream steps mean by a cluster id.
 
-Writes <outdir>/<sample>.cluster_spatialdata_gpu.zarr plus a timing TSV.
+Writes <outdir>/<sample>.cluster_spatialdata_gpu.h5ad plus a timing TSV.
 
 Usage:
     cluster_spatialdata_gpu.py --sample testis_01 \\
-        --path results/testis_01/create_spatialdata/testis_01.zarr \\
+        --table_path results/testis_01/create_spatialdata/testis_01.create_spatialdata.h5ad \\
         --outdir results/testis_01/cluster_spatialdata_gpu
 """
 
 import argparse
 from pathlib import Path
 
+import anndata as ad
 import rapids_singlecell as rsc
-import spatialdata
 
 from timer import timer, timing_summary
 
@@ -58,7 +61,7 @@ def relabel_by_size(labels):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="GPU-accelerated clustering of a SpatialData zarr"
+        description="GPU-accelerated clustering of a SpatialData table"
     )
     parser.add_argument(
         "--sample",
@@ -66,14 +69,14 @@ def parse_args():
         help="Sample identifier",
     )
     parser.add_argument(
-        "--path",
+        "--table_path",
         required=True,
-        help="Path to input SpatialData zarr",
+        help="Table .h5ad from create_spatialdata or create_spatialdata_cellpose",
     )
     parser.add_argument(
         "--outdir",
         default=".",
-        help="Directory to write <sample>.cluster_spatialdata_gpu.zarr into (default: current directory)",
+        help="Directory to write <sample>.cluster_spatialdata_gpu.h5ad into (default: current directory)",
     )
     parser.add_argument(
         "--min_counts",
@@ -96,20 +99,17 @@ def main():
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    output_path = outdir / f"{args.sample}.cluster_spatialdata_gpu.zarr"
+    output_path = outdir / f"{args.sample}.cluster_spatialdata_gpu.h5ad"
 
     print(f"Sample:  {args.sample}")
-    print(f"Input:   {args.path}")
+    print(f"Input:   {args.table_path}")
     print(f"Output:  {output_path}")
     print(f"Res:     {', '.join(f'{r:g}' for r in RESOLUTIONS)}")
     print(f"Filter:  min_counts={args.min_counts}, "
           f"max_counts_quantile={args.max_counts_quantile:g}")
 
-    with timer("Read zarr"):
-        sdata = spatialdata.read_zarr(args.path)
-
-    with timer("Extract table"):
-        adata = sdata.tables["table"].copy()
+    with timer("Read table"):
+        adata = ad.read_h5ad(args.table_path)
 
     print(f"Table:   {adata.n_obs:,} cells x {adata.n_vars:,} genes")
 
@@ -175,13 +175,12 @@ def main():
             )
             adata.obs[ranked_key] = relabel_by_size(adata.obs[leiden_key])
 
-    # rapids-singlecell keeps arrays on GPU; zarr I/O needs them back on the host.
+    # rapids-singlecell keeps arrays on GPU; writing needs them back on the host.
     with timer("Move to CPU"):
         rsc.get.anndata_to_CPU(adata)
 
-    with timer("Write zarr"):
-        sdata.tables["table"] = adata
-        sdata.write(output_path, overwrite=True)
+    with timer("Write table"):
+        adata.write_h5ad(output_path)
 
     print(f"Written to {output_path}")
 
