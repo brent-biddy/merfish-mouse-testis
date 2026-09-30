@@ -179,6 +179,7 @@ It reads the merged segmentation directory:
 
 ```
 labels.npy                    (7, height, width) uint32 raw labels, full mosaic pixels
+  or <sample>-full-merged-labels-compressed.npz, the same array zipped, ~1% the size
 <sample>-cellp-label-map.npz  raw label -> compact cell id, indexed by label - 1
 <sample>-cell-by-gene.npz     counts, row 0 is background
 <sample>-slicee.pkl           per-label bounding boxes, from ndi.find_objects
@@ -239,8 +240,16 @@ is unrecoverable.
 The handoff sheet it writes is already in step 1b's `sample, path, vpt_path` shape,
 forwarding the region unchanged and naming this step's output as the VPT directory.
 
+The raster is read once, a plane at a time, and everything that needs it happens in that one
+pass: the per-plane areas, the transcript lookup, and each cell's mask, kept from the largest
+plane seen so far and traced after the last. One pass is what makes the compressed copy usable
+-- it cannot be memory-mapped, so each further pass would inflate ~45 GB again -- and with it a
+transfer can leave out `labels.npy`, about 600 GB across the fourteen runs. `labels.npy` is
+used when present, being faster to read.
+
 This is the memory-hungriest step: the label raster is about 7 GB per plane and the step
-holds one plane, the counts and the traced polygons at once, measured at a peak near 20 GB.
+holds one plane, the counts and the traced polygons at once, measured at a peak near 20 GB
+with the three-pass version this replaced; the single pass has not been measured yet.
 It has no per-step override, so on `oscer` it takes the retry ladder — 32 GB on
 the first attempt and 32 GB more on each of the three retries — and locally it takes the
 16 GB default, which is not enough. It has never been run on `oscer`; the first run that
