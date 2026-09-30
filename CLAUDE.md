@@ -72,12 +72,12 @@ Add `-stub` to check wiring without doing the work.
 
 ### How artifacts are named
 
-Every artifact is `<sample>.<step>.<ext>` — `u2os_test.cluster_spatialdata_gpu.zarr`, not
-`u2os_test.zarr`. Nothing then collides when files are staged flat: not two samples, and not
+Every artifact is `<sample>.<step>.<ext>` — `u2os_test.cluster_spatialdata_gpu.h5ad`, not
+`u2os_test.h5ad`. Nothing then collides when files are staged flat: not two samples, and not
 one step's input with its own output.
 
 That is what lets a report notebook ask for a specific step —
-`glob("*.annotate_celltypes.zarr")` — instead of `*.zarr` and hoping, and it is why the render
+`glob("*.annotate_celltypes.h5ad")` — instead of `*.h5ad` and hoping, and it is why the render
 step can stage everything into one directory rather than numbered `input*/` subdirectories.
 
 A `--group_by` run puts the column in the name — `<sample>.<column>.centroids.h5ad`, not
@@ -120,28 +120,50 @@ backed up**. The code and `reports/` are safe because they are pushed to GitHub,
 
 ## Workflow
 
+### The store and the table
+
+A SpatialData object is split in two for the length of the pipeline. The **store**
+(`zarr_store`) holds what no step after the first changes — the images, the transcripts,
+the cell boundaries — and is written once, by step 1 or 1b. The **table** (`table_path`)
+is an `.h5ad` beside it, and every later step reads a table and writes a new one, never
+opening the store. The images are ~17 GB of a region's 18 GB, so writing a whole store per
+step would copy them three times over and, on `oscer`, spend most of a run publishing
+them to OURdisk.
+
+The store carries no table at all, rather than the first step's: a table left inside it
+would be out of date by step 2, and nothing would say so. Every handoff sheet from step 1
+on is `sample, zarr_store, table_path`, with `zarr_store` forwarded unchanged.
+
+The two are rejoined only where both are needed: in the report, and in
+`export_spatialdata` when one object is wanted to share. The table names the shapes
+element it annotates (`uns["spatialdata_attrs"]["region"]`), and that is how a table is
+matched to its store. Both check it: SpatialData only warns when an object is built or
+read with a table whose shapes are missing, and says nothing when a table is assigned to an
+object already open, which is how both rejoin them.
+
 Steps run in this order. This table is the ordering contract — there are no numeric
 filename prefixes.
 
 | Step | Script | Samplesheet | Input | Output |
 |------|--------|-------------|-------|--------|
-| 1 | `bin/create_spatialdata.py` | `sample, path` | MERSCOPE region directory | `<sample>.<step>.zarr` |
+| 1 | `bin/create_spatialdata.py` | `sample, path` | MERSCOPE region directory | `<sample>.<step>.zarr` (no table) and `<sample>.<step>.h5ad` |
 | 1a | `bin/prep_cellpose_vpt.py` | `sample, path, cellpose_path` | MERSCOPE region directory and a merged bespoke cellpose segmentation | `cellpose_*.{csv,parquet}` and `detected_transcripts.csv` |
-| 1b | `bin/create_spatialdata_cellpose.py` | `sample, path, vpt_path` | MERSCOPE region directory and VPT cellpose output, from a VPT run or from step 1a | `<sample>.<step>.zarr` |
-| 2 | `bin/cluster_spatialdata_gpu.py` | `sample, path` | zarr from step 1 or 1b | `<sample>.<step>.zarr` |
-| 3 | `bin/annotate_celltypes.py` | `sample, path` | zarr from step 2 | `<sample>.<step>.zarr` |
-| 4 | `bin/create_centroids.py` | `sample, path` | zarr from step 2 or 3 | `<sample>.centroids.h5ad` |
-| 5 | `--qmd`, e.g. `notebooks/celltype_report.qmd` | `sample`, plus whatever path columns the .qmd globs | for `celltype_report.qmd`: zarr from step 3 and centroids from step 4 | `reports/<qmd>_<run_id>_<to>/`, one directory per render — `render_sample` nests one per sample inside it |
+| 1b | `bin/create_spatialdata_cellpose.py` | `sample, path, vpt_path` | MERSCOPE region directory and VPT cellpose output, from a VPT run or from step 1a | `<sample>.<step>.zarr` (no table) and `<sample>.<step>.h5ad` |
+| 2 | `bin/cluster_spatialdata_gpu.py` | `sample, zarr_store, table_path` | table from step 1 or 1b | `<sample>.<step>.h5ad` |
+| 3 | `bin/annotate_celltypes.py` | `sample, zarr_store, table_path` | table from step 2 | `<sample>.<step>.h5ad` |
+| 4 | `bin/create_centroids.py` | `sample, zarr_store, table_path` | table from step 2 or 3 | `<sample>.centroids.h5ad` |
+| 5 | `--qmd`, e.g. `notebooks/celltype_report.qmd` | `sample`, plus whatever path columns the .qmd globs | for `celltype_report.qmd`: the store from step 1 or 1b, the table from step 3 and centroids from step 4 | `reports/<qmd>_<run_id>_<to>/`, one directory per render — `render_sample` nests one per sample inside it |
+| 6 | `bin/export_spatialdata.py` | `sample, zarr_store, table_path` | the store from step 1 or 1b and a table from any step | `<sample>.<step>.zarr`, store and table as one object |
 
 ### 1. create_spatialdata
 
-Reads a raw MERSCOPE output directory and writes it as a SpatialData Zarr store. The
-sample id is written into `table.obs["sample"]`, which later steps read instead of
+Reads a raw MERSCOPE output directory and writes it as a SpatialData Zarr store and a
+table beside it. The sample id is written into `table.obs["sample"]`, which later steps read instead of
 parsing a staged filename, and the loaded z-plane into `table.uns["z_layer"]` as
 provenance — nothing reads that one yet.
 
-The store holds the mosaic image as a multiscale pyramid, the transcripts as 3D points,
-the cell boundaries as polygons, and the count matrix as the table.
+The store holds the mosaic image as a multiscale pyramid, the transcripts as 3D points and
+the cell boundaries as polygons; the count matrix is the table, `<sample>.<step>.h5ad`.
 
 Elements are named `<sample>_<region dir>_<element>`, from the sample id and the raw
 region directory's own name — never from the staged copy below, so staging a sample
@@ -253,14 +275,14 @@ compressed copy alone peaked at 18.1 GB and took 617 s, of which the plane scan 
 writing the 3 GB transcripts CSV 260 s; the three-pass version this replaced took 1,271 s
 and peaked at 21.3 GB reading `labels.npy` under `wsl`, and its counts, metadata and
 transcripts are byte-identical to the single pass's. It has no per-step override, so on
-`oscer` it takes the retry ladder — 32 GB on the first attempt, which is enough, and 32 GB
+`oscer` it takes the retry ladder — 48 GB on the first attempt, which is enough, and 32 GB
 more on each of the three retries — and locally it takes the 16 GB default, which is not.
 
 ### 1b. create_spatialdata_cellpose
 
 An alternative to step 1 for a region that has been re-segmented with cellpose, writing a
-store of the same shape so steps 2 onward read it unchanged. Either step produces a `.zarr`
-and a handoff sheet; a run uses one or the other, not both.
+store and table of the same shape so steps 2 onward read them unchanged. Either step
+produces a `.zarr`, an `.h5ad` and a handoff sheet; a run uses one or the other, not both.
 
 `--vpt_path` takes either a real VPT output directory or step 1a's output, which is
 written in the same shape for exactly that reason.
@@ -368,7 +390,7 @@ nextflow run steps.nf -profile wsl --step annotate_celltypes \
 
 ### 4. create_centroids
 
-Builds one row per cluster from the clustered zarr, at every resolution in the sweep, so
+Builds one row per cluster from the clustered table, at every resolution in the sweep, so
 later steps and reports never open the counts matrix. Writes a small h5ad holding summed
 CP10K in `X` and summed raw counts in `layers["counts"]`, with `n_cells` per row.
 
@@ -385,9 +407,9 @@ once a later step has written it. Those runs are named for the column
 they publish beside a sweep run rather than displacing it and the step can be re-run for
 each grouping you want.
 
-The handoff sheet is `sample,path,centroid_path`: it forwards the zarr this step read
-alongside the centroids it wrote, because a report wants both and only this step knows
-which zarr the centroids came from.
+The handoff sheet is `sample,zarr_store,table_path,centroid_path`: it forwards the store
+and table this step read alongside the centroids it wrote, because a report wants all three
+and only this step knows which table the centroids came from.
 
 A grouping that is a union of v1 clusters needs no run at all — sums are additive, so add
 the rows.
@@ -428,8 +450,8 @@ them, is the notebook's own business. **A new report is therefore a new
 notebook and no Nextflow at all** — copy an existing `.qmd`, edit it, and render it.
 
 Staging is the input contract: the workflow drops every samplesheet path flat beside the
-notebook and the notebook globs the step it wants — `*.annotate_celltypes.zarr`, not
-`*.zarr` — taking each sample's id from inside its object rather than from the staged
+notebook and the notebook globs the step it wants — `*.annotate_celltypes.h5ad`, not
+`*.h5ad` — taking each sample's id from inside its object rather than from the staged
 filename. Flat works because `<sample>.<step>.<ext>` already makes every file distinct, so
 a step that names no columns needs no scheme to keep them apart. Adding a sample needs no
 edit to the notebook.
@@ -439,9 +461,10 @@ GitHub-readable document with a section per sample — its QC, the clustering, t
 calls, what they compose to per cluster, and the calls on tissue. The rest of this section
 describes that notebook rather than the step.
 
-It reads step 4's handoff sheet, which forwards both the zarr it consumed and the
-centroids it wrote. The centroids are what the cluster similarity figure correlates, so
-the notebook never opens a counts matrix.
+It reads step 4's handoff sheet, which forwards the store and table it consumed and the
+centroids it wrote. The table is opened backed, so its counts stay on disk; the store is
+read for its shapes alone, found through the element the table names. The centroids are
+what the cluster similarity figure correlates, so the notebook never reads a counts matrix.
 
 Two knobs live at the top of the notebook, both judgments rather than computations. The
 resolution the whole document reads, since the sweep writes twenty and one has to be
@@ -515,8 +538,24 @@ object, so the two land as neighbouring sections of a single document with no ed
 notebook and no collision in `results/`.
 
 `error: true` is not set, so an uncaught failure fails the render and its exit code. The
-sample loop catches its own, though: a store that will not open, one missing an obs column
+sample loop catches its own, though: a table that will not open, one missing an obs column
 an earlier step should have written, or one slide that raises all draw into the document
 and the other samples still render. So the exit code answers "did setup work", not "is the
 deck complete" — inspect it either way: `unzip -q reports/<dir>/celltype_report.pptx` and
 check the slide count and titles.
+
+### 6. export_spatialdata
+
+Writes one self-contained SpatialData store from a store and a table, for sharing or for a
+tool that opens a SpatialData directly. Terminal, and not part of `main.nf`: it is the one
+step after step 1 that copies the images, so it is run when a single object is wanted, not
+on every analysis.
+
+It fails unless the table annotates shapes the store holds, and unless the table's sample
+is the one its row names. Its handoff sheet keeps the common shape, `sample, zarr_store,
+table_path`: `zarr_store` is the exported store, and `table_path` the table it was built from.
+
+```bash
+nextflow run steps.nf -profile wsl --step export_spatialdata \
+    --samplesheet results/<run_id>/annotate_celltypes_samplesheet.csv
+```

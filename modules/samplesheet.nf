@@ -20,3 +20,14 @@ def samplesFrom(input, List columns = null) {
         return input
     }
 }
+
+// Where a step's input was published, for the handoff sheet. A samplesheet's path already is
+// that. A chained run's is a work dir the run deletes, so rebuild it: modules publish to
+// ${params.outdir}/<sample>/<step>, and <step> is the middle field of <sample>.<step>.<ext>.
+def publishedPath(input, sample, path) {
+    if (input instanceof Path || input instanceof String) {
+        return path.toString()
+    }
+    def step = path.name.substring("${sample}".length() + 1, path.name.lastIndexOf('.'))
+    return "${params.outdir}/${sample}/${step}/${path.name}"
+}

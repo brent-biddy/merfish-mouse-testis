@@ -10,7 +10,8 @@ process CREATE_SPATIALDATA {
     path 'timer.py'
 
     output:
-    tuple val(sample), path("${sample}.create_spatialdata.zarr"), emit: zarr
+    tuple val(sample), path("${sample}.create_spatialdata.zarr"),
+          path("${sample}.create_spatialdata.h5ad"), emit: sdata
     path "${sample}.create_spatialdata.timing.tsv", emit: timings
 
     script:
@@ -21,6 +22,7 @@ process CREATE_SPATIALDATA {
     stub:
     """
     mkdir -p ${sample}.create_spatialdata.zarr
+    touch ${sample}.create_spatialdata.h5ad
     touch ${sample}.create_spatialdata.timing.tsv
     """
 }
@@ -35,11 +37,14 @@ workflow create_spatialdata {
 
     CREATE_SPATIALDATA(ch_region_dirs, file("${projectDir}/bin/timer.py"))
 
-    CREATE_SPATIALDATA.out.zarr
-        .map { sample, zarr -> "${sample},${params.outdir}/${sample}/create_spatialdata/${zarr.name}" }
+    CREATE_SPATIALDATA.out.sdata
+        .map { sample, zarr_store, table ->
+            def published = "${params.outdir}/${sample}/create_spatialdata"
+            "${sample},${published}/${zarr_store.name},${published}/${table.name}"
+        }
         .collectFile(name: 'create_spatialdata_samplesheet.csv', storeDir: params.outdir,
-                     seed: 'sample,path', newLine: true, sort: true)
+                     seed: 'sample,zarr_store,table_path', newLine: true, sort: true)
 
     emit:
-    zarr = CREATE_SPATIALDATA.out.zarr
+    sdata = CREATE_SPATIALDATA.out.sdata // tuple(sample, zarr_store, table)
 }

@@ -11,7 +11,13 @@ Boundaries written as a pre-VPT cell_boundaries/ directory of per-FOV HDF5 files
 are converted to the cell_boundaries.parquet the reader expects; a region with
 neither is an error rather than a store with no polygons in it.
 
-Writes <outdir>/<sample>.create_spatialdata.zarr plus a timing TSV.
+Writes <outdir>/<sample>.create_spatialdata.zarr, <outdir>/<sample>.create_spatialdata.h5ad
+and a timing TSV.
+
+The store holds what no later step changes -- images, transcripts, cell boundaries -- and
+the table is written beside it as an .h5ad. Later steps read and write only the table, so
+the 18 GB of images is written once, not once per step; export_spatialdata.py puts the two
+back together when a single object is wanted.
 
 Usage:
     create_spatialdata.py --sample testis_01 \\
@@ -160,7 +166,7 @@ def parse_args():
     parser.add_argument(
         "--outdir",
         default=".",
-        help="Directory to write <sample>.create_spatialdata.zarr into (default: current directory)",
+        help="Directory to write <sample>.create_spatialdata.{zarr,h5ad} into (default: current directory)",
     )
     return parser.parse_args()
 
@@ -171,10 +177,12 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     output_path = outdir / f"{args.sample}.create_spatialdata.zarr"
+    table_path = outdir / f"{args.sample}.create_spatialdata.h5ad"
 
     print(f"Sample:  {args.sample}")
     print(f"Input:   {args.path}")
     print(f"Output:  {output_path}")
+    print(f"Table:   {table_path}")
     print(f"Z-layer: {Z_LAYER}")
 
     raw_region_dir = Path(args.path)
@@ -204,13 +212,17 @@ def main():
 
     # Record the sample id in the object: every later step and the report read it from
     # there rather than parsing a staged filename.
-    for name, table in sdata.tables.items():
-        table.obs["sample"] = args.sample
-        table.uns["z_layer"] = Z_LAYER
-        print(f"  table   {name}: {table.n_obs:,} cells x {table.n_vars:,} genes")
+    table = sdata.tables["table"]
+    table.obs["sample"] = args.sample
+    table.uns["z_layer"] = Z_LAYER
+    print(f"  table   {table.n_obs:,} cells x {table.n_vars:,} genes")
 
+    del sdata.tables["table"]
     with timer("Write Zarr"):
         sdata.write(output_path, overwrite=True)
+
+    with timer("Write table"):
+        table.write_h5ad(table_path)
 
     timing_summary(outdir / f"{args.sample}.create_spatialdata.timing.tsv")
 

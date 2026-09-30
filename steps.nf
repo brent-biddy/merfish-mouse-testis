@@ -7,9 +7,12 @@
 //   create_spatialdata           sample, path=region dir
 //   prep_cellpose_vpt            sample, path=region dir, cellpose_path=merged bespoke cellpose
 //   create_spatialdata_cellpose  sample, path=region dir, vpt_path=its VPT cellpose output
-//   cluster_spatialdata_gpu      sample, path=zarr from either create step
-//   annotate_celltypes           sample, path=zarr from cluster_spatialdata_gpu
-//   create_centroids             sample, path=zarr from either of the two above
+//   cluster_spatialdata_gpu      sample, zarr_store, table_path=table from either create step
+//   annotate_celltypes           sample, zarr_store, table_path=table from cluster_spatialdata_gpu
+//   create_centroids             sample, zarr_store, table_path=table from either of the two above
+//   export_spatialdata           sample, zarr_store, table_path=table from any step
+//
+// zarr_store is always the store a create step wrote: later steps write only the table.
 //   render_cohort                sample, and any path columns the .qmd globs
 //   render_sample                same as render_cohort, one render per row
 
@@ -19,6 +22,7 @@ include { create_spatialdata_cellpose } from './modules/create_spatialdata_cellp
 include { cluster_spatialdata_gpu } from './modules/cluster_spatialdata_gpu'
 include { annotate_celltypes      } from './modules/annotate_celltypes'
 include { create_centroids        } from './modules/create_centroids'
+include { export_spatialdata      } from './modules/export_spatialdata'
 include { render                  } from './modules/render'
 
 workflow {
@@ -28,7 +32,8 @@ workflow {
     def valid_steps = ['create_spatialdata', 'prep_cellpose_vpt',
                        'create_spatialdata_cellpose',
                        'cluster_spatialdata_gpu', 'annotate_celltypes',
-                       'create_centroids', 'render_cohort', 'render_sample']
+                       'create_centroids', 'export_spatialdata',
+                       'render_cohort', 'render_sample']
 
     if (!params.samplesheet)           error "Please provide --samplesheet"
     if (!(params.step in valid_steps)) error "Please provide a valid --step. Valid steps: ${valid_steps.join(', ')}"
@@ -41,6 +46,7 @@ workflow {
     else if (params.step == 'cluster_spatialdata_gpu') cluster_spatialdata_gpu(sheet)
     else if (params.step == 'annotate_celltypes')      annotate_celltypes(sheet)
     else if (params.step == 'create_centroids')        create_centroids(sheet)
+    else if (params.step == 'export_spatialdata')      export_spatialdata(sheet)
     else if (params.step == 'render_cohort')           render(sheet, qmd, params.to, false)
     else if (params.step == 'render_sample')           render(sheet, qmd, params.to, true)
 }

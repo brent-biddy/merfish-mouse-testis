@@ -95,9 +95,20 @@ plt.rcParams.update({
 # The render step stages every samplesheet path flat and names no columns, so globbing is
 # how this notebook asks. The glob names a step, not an extension: two steps' outputs stage
 # side by side.
-ZARRS = sorted(Path(".").glob("*.annotate_celltypes.zarr"))
-if not ZARRS:
-    raise FileNotFoundError("No *.annotate_celltypes.zarr staged next to the notebook.")
+TABLES = sorted(Path(".").glob("*.annotate_celltypes.h5ad"))
+if not TABLES:
+    raise FileNotFoundError("No *.annotate_celltypes.h5ad staged next to the notebook.")
+
+# The boundaries are in the store a create step wrote, not in the table. Each table names the
+# shapes element it annotates, and a store's elements are its shapes/ directories, so a table
+# finds its store without any store being read.
+STORE_OF = {}
+for zarr_store in sorted(Path(".").glob("*.create_spatialdata*.zarr")):
+    for element in (zarr_store / "shapes").iterdir():
+        if element.is_dir():
+            STORE_OF[element.name] = zarr_store
+if not STORE_OF:
+    raise FileNotFoundError("No *.create_spatialdata*.zarr staged next to the notebook.")
 
 # Keyed on the sample inside each store, not on staging order. A --group_by run names them
 # <sample>.<column>.centroids.h5ad, which the same glob takes.
@@ -558,22 +569,13 @@ def annotation_table_slide(summary):
 :::
 
 ```{python}
-for path in ZARRS:
+for path in TABLES:
     # ── read one sample, with the counts matrix left on disk ──────────────────────────
-    # Its own try: a store that will not open has no sample id to head its section with.
+    # Its own try: a table that will not open has no sample id to head its section with.
     # Uncaught here, it would abort the cell and take every later sample with it.
     try:
-        # X stays lazy; no slide reads a value out of it. obs and var cannot: read_lazy
-        # returns them as Dataset2D, which strings_to_categoricals and every scanpy
-        # plotting call choke on. scverse/anndata#981.
-        adata = ad.experimental.read_lazy(f"{path}/tables/table")
-        adata.obs = adata.obs.to_memory()
-        adata.var = adata.var.to_memory()
-
-        # sc.pl.umap indexes these with a tuple of dimensions, which a lazy array refuses.
-        # Only these two: np.asarray flattens obsm's blank-probe frame to nothing.
-        for key in ("X_umap", "spatial"):
-            adata.obsm[key] = np.asarray(adata.obsm[key])
+        # Backed, so X stays on disk; no slide reads a value out of it.
+        adata = ad.read_h5ad(path, backed="r")
     except Exception:
         display(Markdown(f"# {path.name}"))
         display(Markdown(f"```\n{traceback.format_exc()}\n```"))
@@ -583,7 +585,7 @@ for path in ZARRS:
     if missing:
         display(Markdown(f"# {path.name}"))
         display(Markdown(
-            "This store is missing obs columns this report reads:\n\n"
+            "This table is missing obs columns this report reads:\n\n"
             + "\n".join(f"- `{column}`, written by {REQUIRED_OBS[column]}"
                         for column in missing)
         ))
@@ -595,10 +597,16 @@ for path in ZARRS:
     display(Markdown(f"# {sample}"))
 
     try:
-        # read_zarr leaves images and points lazy; shapes come into memory, which is what
-        # outlines need. More boundaries than cells -- the clustering filter dropped some.
-        shapes = spatialdata.read_zarr(path).shapes
-        boundaries = shapes[next(key for key in shapes if key.endswith("_polygons"))]
+        # Only the shapes, which come into memory, as outlines need. The table is never put
+        # into a SpatialData object here, so nothing but this check would notice a store that
+        # lacks its shapes. More boundaries than cells -- the clustering filter dropped some.
+        region = adata.uns["spatialdata_attrs"]["region"]
+        if region not in STORE_OF:
+            raise FileNotFoundError(
+                f"No staged store holds {region}, the shapes {path.name} annotates. "
+                f"Staged stores hold: {sorted(STORE_OF)}"
+            )
+        boundaries = spatialdata.read_zarr(STORE_OF[region], selection=("shapes",)).shapes[region]
 
         # ── each cell's correlation with each reference cell type ─────────────────────
         cell_types = list(adata.obs["cell_type_per_cell"].cat.categories)
