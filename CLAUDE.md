@@ -200,6 +200,7 @@ It reads the merged segmentation directory:
 
 ```
 labels.npy                    (7, height, width) uint32 raw labels, full mosaic pixels
+  or <sample>-full-merged-labels-compressed.npz, the same array zipped, ~1% the size
 <sample>-cellp-label-map.npz  raw label -> compact cell id, indexed by label - 1
 <sample>-cell-by-gene.npz     counts, row 0 is background
 <sample>-slicee.pkl           per-label bounding boxes, from ndi.find_objects
@@ -260,12 +261,21 @@ is unrecoverable.
 The handoff sheet it writes is already in step 1b's `sample, path, vpt_path` shape,
 forwarding the region unchanged and naming this step's output as the VPT directory.
 
+The raster is read once, a plane at a time, and everything that needs it happens in that one
+pass: the per-plane areas, the transcript lookup, and each cell's mask, kept from the largest
+plane seen so far and traced after the last. One pass is what makes the compressed copy usable
+-- it cannot be memory-mapped, so each further pass would inflate ~45 GB again -- and with it a
+transfer can leave out `labels.npy`, about 600 GB across the fourteen runs. `labels.npy` is
+used when present, being faster to read.
+
 This is the memory-hungriest step: the label raster is about 7 GB per plane and the step
-holds one plane, the counts and the traced polygons at once, measured at a peak near 20 GB.
-It has no per-step override, so on `oscer` it takes the retry ladder — 48 GB on
-the first attempt and 32 GB more on each of the three retries — and locally it takes the
-16 GB default, which is not enough. It has never been run on `oscer`; the first run that
-does is worth recording the real peak from.
+holds one plane, the transcripts and the kept masks at once. On `oscer`, b2r0 from the
+compressed copy alone peaked at 18.1 GB and took 617 s, of which the plane scan was 190 s and
+writing the 3 GB transcripts CSV 260 s; the three-pass version this replaced took 1,271 s
+and peaked at 21.3 GB reading `labels.npy` under `wsl`, and its counts, metadata and
+transcripts are byte-identical to the single pass's. It has no per-step override, so on
+`oscer` it takes the retry ladder — 48 GB on the first attempt, which is enough, and 32 GB
+more on each of the three retries — and locally it takes the 16 GB default, which is not.
 
 ### 1b. create_spatialdata_cellpose
 
