@@ -147,7 +147,7 @@ filename prefixes.
 | Step | Script | Samplesheet | Input | Output |
 |------|--------|-------------|-------|--------|
 | 1 | `bin/create_spatialdata.py` | `sample, path` | MERSCOPE region directory | `<sample>.<step>.zarr` (no table) and `<sample>.<step>.h5ad` |
-| 1a | `bin/prep_cellpose_vpt.py` | `sample, path, cellpose_path` | MERSCOPE region directory and a merged bespoke cellpose segmentation | `cellpose_*.{csv,parquet}` and `detected_transcripts.csv` |
+| 1a | `bin/prep_cellpose_vpt.py` | `sample, path, cellpose_path`, optional `label_offset` | MERSCOPE region directory and a merged bespoke cellpose segmentation | `cellpose_*.{csv,parquet}` and `detected_transcripts.csv` |
 | 1b | `bin/create_spatialdata_cellpose.py` | `sample, path, vpt_path` | MERSCOPE region directory and VPT cellpose output, from a VPT run or from step 1a | `<sample>.<step>.zarr` (no table) and `<sample>.<step>.h5ad` |
 | 2 | `bin/cluster_spatialdata_gpu.py` | `sample, zarr_store, table_path` | table from step 1 or 1b | `<sample>.<step>.h5ad` |
 | 3 | `bin/annotate_celltypes.py` | `sample, zarr_store, table_path` | table from step 2 | `<sample>.<step>.h5ad` |
@@ -225,6 +225,23 @@ happens to agree wherever labels are contiguous and is off by one across every g
 is silent — it gives a cell its neighbour's counts. The step therefore checks the join
 before writing anything: each label's voxels in the raster must equal the volume
 `merge.py` recorded for the cell it maps to, exactly, or the run fails.
+
+**merge.py's raster is not always the whole mosaic.** For some sections it was cut to the
+FOVs' bounding box plus a 400-pixel buffer, so its pixel (0, 0) sits elsewhere in the
+mosaic. Of the fourteen runs only c1r1 is cut this way: its raster is 49,433 x 43,814
+against a 48,867 x 43,227 mosaic, and starts 270 rows above and 293 columns left of it.
+The samplesheet's optional `label_offset` column says where, as `"ROWS,COLUMNS"` in mosaic
+pixels of the raster's (0, 0) -- quoted, since the value holds a comma; blank means 0.
+The figure comes from Alex Vargo's `section.py` (`generate_segmentation_offsets`, over the
+region's `uniq-fovs.csv`), not from the data. It is applied wherever a raster pixel meets a
+micron position: the transcript lookup, the polygons and the bounding boxes. merge.py's
+centres are already in mosaic pixels, so they need none -- and they are what checks it.
+Every cell's centre must land inside its own bounding box once shifted, and the run fails
+before the scan if the offset in use, 0 included, cannot manage that for every cell. The
+counts and the volume check do not depend on position, which is how c1r1 once passed with
+its polygons and transcript assignments shifted. The offset used and the range the cells
+allow land in `prep_cellpose_vpt.json` beside the outputs, which step 1b carries into the
+table as `uns["prep_cellpose_vpt"]`.
 
 The segmentation is 3D over seven z planes and a store holds one, so **each cell's
 boundary is taken from the plane it covers most**. Fixing a single plane instead would

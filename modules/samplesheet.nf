@@ -2,10 +2,11 @@
 // Without one, sample and every path its row named, which is what a notebook needs: it
 // declares what it wants by globbing, so render cannot name the columns.
 def samplesFrom(input, List columns = null) {
-    // steps.nf passes a samplesheet
+    // steps.nf passes a samplesheet. Quotes honoured, so a value may hold a comma -- step 1a's
+    // label_offset is ROWS,COLUMNS -- which splitCsv otherwise splits on.
     if (input instanceof Path || input instanceof String) {
         def ch_samples = channel.fromPath(input)
-            .splitCsv(header: true)
+            .splitCsv(header: true, quote: '"')
             .map { row ->
                 def cols = columns ?: ['sample'] + (row.keySet() - 'sample').toList()
                 cols.each { c -> if (!row[c]) error "Samplesheet row missing '${c}': ${row}" }

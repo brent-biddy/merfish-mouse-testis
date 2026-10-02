@@ -33,6 +33,16 @@ The segmentation is 3D over 7 planes and a store holds one, so each cell's bound
 from the plane it covers most; a cell centred near the top or bottom of the section still
 gets one, and which plane lands in obs["z_plane"].
 
+The raster is not always the whole mosaic. merge.py cut some sections to their FOVs' bounding
+box plus a buffer, so pixel (0, 0) of the raster sits elsewhere in the mosaic -- c1r1's starts
+270 rows above and 293 columns left of it. --label_offset says where, as mosaic row and
+column of raster (0, 0), and is applied wherever a raster pixel meets a micron position:
+transcript lookup, polygons and bounding boxes. merge.py's centres are already in mosaic
+pixels, which is what checks it: every cell's centre has to land inside its own bounding
+box once shifted, and the run fails if the offset in use, 0 included, cannot do that. The
+offset comes from Alex Vargo's section.py (generate_segmentation_offsets), not from the
+check, which narrows it to a pixel or two but not always to one.
+
 Everything that needs the raster is done in one pass over its planes -- the areas, the
 transcript lookup and each cell's mask -- because the compressed copy can only be read in
 order: a second pass would mean inflating ~45 GB again. labels.npy is used when present, as
@@ -43,8 +53,8 @@ whose mask traced to nothing: the parquet is the only output a missing polygon c
 out of, and metadata["has_boundary"] says which those are.
 
 Writes <outdir>/cellpose_{cell_by_gene.csv,cell_metadata.csv,micron_space.parquet}, a
-detected_transcripts.csv carrying the cell_id column VPT would have written, and a timing
-TSV. Point create_spatialdata_cellpose.py --vpt_path at <outdir>.
+detected_transcripts.csv carrying the cell_id column VPT would have written, a
+prep_cellpose_vpt.json recording the offset and inputs used, and a timing TSV. Point create_spatialdata_cellpose.py --vpt_path at <outdir>.
 
 Usage:
     prep_cellpose_vpt.py --sample b2r0_cellpose \\
@@ -54,6 +64,7 @@ Usage:
 """
 
 import argparse
+import json
 import pickle
 import zipfile
 from pathlib import Path
@@ -93,6 +104,9 @@ COMPRESSED_LABELS_SUFFIX = "-full-merged-labels-compressed.npz"
 # Read from the region and rewritten with a cell_id column. VPT's own name for both the
 # column and the file, and -1 for a transcript in no cell -- see vpt/partition_transcripts.
 TRANSCRIPTS_NAME = "detected_transcripts.csv"
+# Read by create_spatialdata_cellpose.py into the table's uns, so the offset a store was
+# built with travels with it.
+PROVENANCE_NAME = "prep_cellpose_vpt.json"
 UNASSIGNED = -1
 
 
@@ -216,16 +230,17 @@ def label_of_cell(label_map):
     return reverse
 
 
-def cell_bounds(slices, label_index, transform):
+def cell_bounds(slices, label_index, transform, offset):
     """Return per-cell (min_x, min_y, max_x, max_y) in microns.
 
     From merge.py's bounding boxes rather than the traced polygons: they cover every plane
-    the cell occupies, and they exist for a cell whose trace produced nothing.
+    the cell occupies, and they exist for a cell whose trace produced nothing. The boxes are
+    raster pixels, so the offset moves them into the mosaic first.
     """
-    row_starts = np.array([slices[index][1].start for index in label_index])
-    row_stops = np.array([slices[index][1].stop for index in label_index])
-    column_starts = np.array([slices[index][2].start for index in label_index])
-    column_stops = np.array([slices[index][2].stop for index in label_index])
+    row_starts = np.array([slices[index][1].start for index in label_index]) + offset[0]
+    row_stops = np.array([slices[index][1].stop for index in label_index]) + offset[0]
+    column_starts = np.array([slices[index][2].start for index in label_index]) + offset[1]
+    column_stops = np.array([slices[index][2].stop for index in label_index]) + offset[1]
 
     # Both corners through the affine, then min and max, so a rotation could not flip them.
     x0, y0 = to_microns(row_starts, column_starts, transform)
@@ -234,19 +249,20 @@ def cell_bounds(slices, label_index, transform):
             np.maximum(x0, x1), np.maximum(y0, y1))
 
 
-def transcript_pixels(transcripts, to_pixels, shape):
+def transcript_pixels(transcripts, to_pixels, shape, offset):
     """Return each transcript's (rows, columns, planes) in the raster, and which are on it.
 
     global_z is a plane index, 0 to 6, not a micron depth -- so it selects the labels plane
-    directly, and the transcript's micron position indexes into it.
+    directly, and the transcript's micron position indexes into it. The micron position
+    gives a mosaic pixel; the offset takes it to the raster's.
     """
     pixels = to_pixels @ np.stack([
         transcripts["global_x"].to_numpy(),
         transcripts["global_y"].to_numpy(),
         np.ones(len(transcripts)),
     ])
-    columns = np.rint(pixels[0]).astype(np.int64)
-    rows = np.rint(pixels[1]).astype(np.int64)
+    columns = np.rint(pixels[0]).astype(np.int64) - offset[1]
+    rows = np.rint(pixels[1]).astype(np.int64) - offset[0]
     planes = transcripts["global_z"].to_numpy().astype(np.int64)
 
     n_planes, height, width = shape
@@ -324,6 +340,35 @@ def check_volumes(areas, label_map, volumes):
     print(f"Volume check: {len(present):,} cells match cell-vols.npz exactly.")
 
 
+def check_offset(slices, label_map, centres, offset):
+    """Fail unless every cell's centre lands inside its own bounding box under this offset.
+
+    The bounding boxes are raster pixels and the centres mosaic pixels, so for each axis a
+    cell allows offsets in (centre - stop, centre - start]; the offset in use has to be in
+    every cell's range at once. Returns the combined (low, high) range per axis.
+    """
+    present = np.nonzero(label_map)[0]             # index into label_map, i.e. label - 1
+    centre = centres[label_map[present] - 1]       # (z, y, x) in mosaic pixels
+    allowed = []
+    for axis, name in ((1, "rows"), (2, "columns")):
+        starts = np.array([slices[index][axis].start for index in present])
+        stops = np.array([slices[index][axis].stop for index in present])
+        low = int(np.floor((centre[:, axis] - stops).max())) + 1
+        high = int(np.floor((centre[:, axis] - starts).min()))
+        allowed.append((low, high))
+        if not low <= offset[axis - 1] <= high:
+            raise ValueError(
+                f"A label offset of {offset[axis - 1]} {name} puts cell centres outside their "
+                f"own bounding boxes; {len(present):,} cells allow {low} to {high}. The raster "
+                f"is not where --label_offset says in the mosaic -- see section.py's "
+                f"generate_segmentation_offsets for how merge.py cropped it."
+            )
+    print(f"Offset check: {offset[0]} rows, {offset[1]} columns is consistent with all "
+          f"{len(present):,} cells (rows {allowed[0][0]}..{allowed[0][1]}, "
+          f"columns {allowed[1][0]}..{allowed[1][1]}).")
+    return allowed
+
+
 def micron_to_pixel_transform(region_dir):
     """Return the region's own affine taking microns to mosaic pixels."""
     path = region_dir / "images" / "micron_to_mosaic_pixel_transform.csv"
@@ -399,8 +444,8 @@ def cell_polygon(mask, y_offset, x_offset, transform):
     return MultiPolygon(polygons)
 
 
-def trace_boundaries(masks, slices, label_map, transform):
-    """Trace one polygon per cell from the mask scan_planes kept for it.
+def trace_boundaries(masks, slices, label_map, transform, offset):
+    """Trace one polygon per cell from the mask scan_planes kept for it, in mosaic pixels.
 
     A cell whose mask traces to nothing is left out of the parquet; it still gets a row in
     the counts and the metadata, so the table carries every cell the segmentation found.
@@ -412,7 +457,8 @@ def trace_boundaries(masks, slices, label_map, transform):
         packed, shape = masks[index]
         mask = np.unpackbits(packed, count=shape[0] * shape[1]).reshape(shape).astype(bool)
         _, rows, columns = slices[index]
-        polygon = cell_polygon(mask, rows.start, columns.start, transform)
+        polygon = cell_polygon(mask, rows.start + offset[0], columns.start + offset[1],
+                               transform)
         if polygon is None:
             continue
 
@@ -447,11 +493,25 @@ def parse_args():
              "copy) and merge.py's arrays",
     )
     parser.add_argument(
+        "--label_offset",
+        default="0,0",
+        help="ROWS,COLUMNS: where the raster's pixel (0, 0) sits in the mosaic, for a "
+             "segmentation merge.py cropped -- c1r1 is -270,-293. Pass it as "
+             "--label_offset=-270,-293, or argparse reads the minus sign as a flag "
+             "(default: %(default)s)",
+    )
+    parser.add_argument(
         "--outdir",
         default=".",
         help="Directory to write the VPT files into (default: current directory)",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        args.label_offset = tuple(int(part) for part in args.label_offset.split(","))
+        assert len(args.label_offset) == 2
+    except (ValueError, AssertionError):
+        parser.error(f"--label_offset takes ROWS,COLUMNS as two integers, got {args.label_offset}")
+    return args
 
 
 def main():
@@ -467,6 +527,7 @@ def main():
     print(f"Region:   {region_dir}")
     print(f"Cellpose: {cellpose_dir}")
     print(f"Output:   {outdir}")
+    print(f"Offset:   {args.label_offset[0]} rows, {args.label_offset[1]} columns")
 
     with timer("Load segmentation"):
         labels, label_map, counts, centres, volumes = load_segmentation(cellpose_dir)
@@ -495,9 +556,13 @@ def main():
             f"{len(label_map):,}; both index raw label - 1 and must agree."
         )
 
+    # Before the scan: a wrong offset assigns every transcript and draws every polygon in the
+    # wrong place, and the volume check cannot see it, since a cell's voxels do not move.
+    allowed = check_offset(slices, label_map, centres, args.label_offset)
+
     with timer("Read transcripts"):
         transcripts = pd.read_csv(region_dir / TRANSCRIPTS_NAME)
-        pixels = transcript_pixels(transcripts, to_pixels, labels.shape)
+        pixels = transcript_pixels(transcripts, to_pixels, labels.shape, args.label_offset)
 
     with timer("Scan planes"):
         areas, cell_id, masks = scan_planes(labels, label_map, slices, pixels)
@@ -512,7 +577,7 @@ def main():
     best_plane[label_map == 0] = -1
 
     with timer("Trace boundaries"):
-        boundaries = trace_boundaries(masks, slices, label_map, transform)
+        boundaries = trace_boundaries(masks, slices, label_map, transform, args.label_offset)
     del masks
 
     # merscope() drops invalid geometries without warning, so a polygon that survives the
@@ -541,7 +606,8 @@ def main():
         centre_x, centre_y = to_microns(
             centres[entity_ids - 1, 1], centres[entity_ids - 1, 2], transform
         )
-        min_x, min_y, max_x, max_y = cell_bounds(slices, label_index, transform)
+        min_x, min_y, max_x, max_y = cell_bounds(slices, label_index, transform,
+                                                 args.label_offset)
         # merge.py counted voxels; a Vizgen cell_metadata.csv holds cubic microns, which is
         # what everything downstream reads this column expecting.
         voxel_microns = abs(np.linalg.det(transform[:2, :2])) * Z_STEP_MICRONS
@@ -572,9 +638,17 @@ def main():
 
     check_counts(transcripts, counts, genes, entity_ids)
 
+    provenance = {
+        "label_offset": list(args.label_offset),
+        "label_offset_allowed": {"rows": list(allowed[0]), "columns": list(allowed[1])},
+        "labels": labels.path.name,
+        "cellpose_path": str(cellpose_dir.resolve()),
+    }
+    (outdir / PROVENANCE_NAME).write_text(json.dumps(provenance, indent=2) + "\n")
+
     print(f"\nWrote {len(entity_ids):,} cells, "
           f"{len(entity_ids) - len(boundaries):,} of them without a boundary:")
-    for name in list(OUTPUT_NAMES.values()) + [TRANSCRIPTS_NAME]:
+    for name in list(OUTPUT_NAMES.values()) + [TRANSCRIPTS_NAME, PROVENANCE_NAME]:
         print(f"  {name}")
 
     timing_summary(outdir / f"{args.sample}.prep_cellpose_vpt.timing.tsv")

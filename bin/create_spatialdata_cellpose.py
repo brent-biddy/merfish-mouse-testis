@@ -31,6 +31,7 @@ Usage:
 """
 
 import argparse
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -213,6 +214,10 @@ def main():
     table.uns["z_layer"] = Z_LAYER
     table.uns["segmentation"] = "cellpose"
     table.uns["vpt_path"] = str(vpt_dir.resolve())
+    # Written by prep_cellpose_vpt.py, so absent from a real VPT run.
+    provenance = vpt_dir / "prep_cellpose_vpt.json"
+    if provenance.exists():
+        table.uns["prep_cellpose_vpt"] = json.loads(provenance.read_text())
     print(f"  table   {table.n_obs:,} cells x {table.n_vars:,} genes")
 
     del sdata.tables["table"]

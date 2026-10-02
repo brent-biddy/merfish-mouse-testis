@@ -1,3 +1,3 @@
-sample,path,cellpose_path
-a1r1_cellpose3d,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/20220426/analyzed_data/MsTestis_A1_VS19_PNA-Aux4_Cellbound_V6_BP_3-23-2022/region_1,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/segmentation/a1r1-051223
-c1r1_cellpose3d,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/20220426/analyzed_data/MsTestis_C1_VS19_PNA-Aux4_Cellbound_QC_V6_BP_3-22-2022/region_1,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/segmentation/c1r1-050323
+sample,path,cellpose_path,label_offset
+a1r1_cellpose3d,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/20220426/analyzed_data/MsTestis_A1_VS19_PNA-Aux4_Cellbound_V6_BP_3-23-2022/region_1,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/segmentation/a1r1-051223,
+c1r1_cellpose3d,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/20220426/analyzed_data/MsTestis_C1_VS19_PNA-Aux4_Cellbound_QC_V6_BP_3-22-2022/region_1,/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis-data/segmentation/c1r1-050323,"-270,-293"

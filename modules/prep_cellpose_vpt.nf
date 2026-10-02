@@ -6,23 +6,23 @@ process PREP_CELLPOSE_VPT {
     publishDir { "${params.outdir}/${sample}/prep_cellpose_vpt" }, mode: 'copy'
 
     input:
-    tuple val(sample), path(region_dir), path(cellpose_dir)
+    tuple val(sample), path(region_dir), path(cellpose_dir), val(label_offset)
     path 'timer.py'
 
     output:
-    tuple val(sample), path("*.{csv,parquet}"), emit: vpt_files
+    tuple val(sample), path("*.{csv,parquet,json}"), emit: vpt_files
     path "${sample}.prep_cellpose_vpt.timing.tsv", emit: timings
 
     script:
     """
     prep_cellpose_vpt.py --sample ${sample} --path ${region_dir} \\
-        --cellpose_path ${cellpose_dir} --outdir .
+        --cellpose_path ${cellpose_dir} --label_offset=${label_offset} --outdir .
     """
 
     stub:
     """
     touch cellpose_cell_by_gene.csv cellpose_cell_metadata.csv cellpose_micron_space.parquet
-    touch detected_transcripts.csv
+    touch detected_transcripts.csv prep_cellpose_vpt.json
     touch ${sample}.prep_cellpose_vpt.timing.tsv
     """
 }
@@ -35,7 +35,14 @@ workflow prep_cellpose_vpt {
     main:
     def ch_segmentations = samplesFrom(input, ['sample', 'path', 'cellpose_path'])
 
-    PREP_CELLPOSE_VPT(ch_segmentations, file("${projectDir}/bin/timer.py"))
+    // label_offset is optional and not a path, so samplesFrom cannot take it: a blank or
+    // missing column means merge.py's raster is the whole mosaic. The step checks it either way.
+    def ch_offsets = input instanceof Path || input instanceof String
+        ? channel.fromPath(input).splitCsv(header: true, quote: '"')
+            .map { row -> tuple(row.sample, row.label_offset ?: '0,0') }
+        : ch_segmentations.map { row -> tuple(row[0], '0,0') }
+
+    PREP_CELLPOSE_VPT(ch_segmentations.join(ch_offsets), file("${projectDir}/bin/timer.py"))
 
     // Rejoined rather than carried through the process, which never reads it: the region
     // staged into the task is a work dir, not where the caller pointed.
