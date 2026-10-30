@@ -398,7 +398,9 @@ of these per-cell calls, which is a judgment made by a person — the reference 
 a type would land, not that it was found.
 
 `--reference` selects the table; it defaults to
-`assets/reference/shami_human_testis_centroids.csv.gz`, the only one there.
+`assets/reference/shami_human_testis_centroids.csv.gz`. The other there is
+`green_mouse_testis_centroids.csv.gz`, Alex Vargo's 32 mouse cell types over the 491 panel
+genes; how its values were computed is unconfirmed, and its header says so.
 
 ```bash
 nextflow run steps.nf -profile wsl --step annotate_celltypes \
