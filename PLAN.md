@@ -45,22 +45,31 @@ The notebook's first sections, in order, with the two checkpoints marked:
 2. Filter cells
 3. Normalize
 4. PCA, neighbours and UMAP
-5. Leiden clustering
-6. Marker genes per cluster
+5. Leiden clustering at a few resolutions: 0.5, 1.0, 1.5 and 2.0
 
-   **Checkpoint 1, clustered:** the filtered, clustered table with its markers.
+   **Checkpoint 1, clustered:** the filtered table with a cluster column per resolution.
 
-7. Per-cell correlation against each reference
-8. Cluster composition of the per-cell calls
-9. Cluster calls
+6. Choose the resolution to annotate, 1.0 to start
+7. Marker genes per cluster, at that resolution
+8. Per-cell correlation against each reference
+9. Cluster composition of the per-cell calls
+10. Cluster calls
 
-   **Checkpoint 2, annotated:** the table with per-cell and per-cluster calls.
+    **Checkpoint 2, annotated:** the table with per-cell and per-cluster calls, and the markers.
 
-The split lets clustering and annotation be iterated on separately. Changing the correlation or
-the calls reruns only sections 7 to 9 from checkpoint 1; changing the clustering reruns from
-section 2 and invalidates checkpoint 2 with it, since its key includes checkpoint 1's. The
-cluster calls are made by hand, so they enter as a written table of cluster to type, and that
-table is part of checkpoint 2's key.
+The split lets clustering and annotation be iterated on separately. Changing the resolution,
+the markers, the correlation or the calls reruns only sections 6 to 10 from checkpoint 1;
+changing the clustering reruns from section 2 and invalidates checkpoint 2 with it, since its
+key includes checkpoint 1's. The chosen resolution is part of checkpoint 2's key, not
+checkpoint 1's, so trying another of the four never reclusters. The cluster calls are made by
+hand, so they enter as a written table of cluster to type, and that table is part of
+checkpoint 2's key too.
+
+Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
+cheap, and because 1.0 may be too coarse for the Green reference: the earlier b2r0 report had
+19 clusters at 1.0, several Ambiguous, against Green's 32 types, 16 of them germ cells. Germ
+cells are a continuous trajectory that Leiden cuts at arbitrary points, so what a resolution is
+judged by is whether its clusters are fine enough to match the reference's types.
 
 A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
 or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
@@ -114,7 +123,7 @@ untuned, so the analysis can move on to the tubule phases. Where a sweep could i
 how to judge it, is noted at the end of each section and left for later.
 
 The notebook starts from the recipe step 2 (`bin/cluster_spatialdata_gpu.py`) uses, as a
-default for every section, read at resolution 1.0.
+default for every section, clustered at four resolutions and annotated at 1.0.
 
 | Stage | Default |
 |---|---|
@@ -126,7 +135,7 @@ default for every section, read at resolution 1.0.
 | PCA | 30 components |
 | Neighbors | Cosine distance, rapids default k = 15 |
 | UMAP | On that graph |
-| Leiden | Resolutions 0.1 to 2.0 in steps of 0.1, all written; 1.0 is the one read; random seed 0 throughout |
+| Leiden | Resolutions 0.5, 1.0, 1.5 and 2.0, all written; 1.0 is the one annotated; random seed 0 throughout |
 
 Each resolution leaves two columns. `_v0` is Leiden's own labelling; `_v1` renumbers clusters
 1..k by size, so cluster 1 is the largest. **v1 is what every call and figure names a cluster
@@ -136,13 +145,12 @@ neighbouring numbers are transcriptionally similar; figures read `v1 (v2)`.
 Normalizing to each section's own median makes log-normalized values a per-section scale.
 Anything compared across sections starts from counts.
 
-Step 4 (`bin/create_centroids.py`) then sums counts and CP10K per cluster at every resolution.
+Step 4 (`bin/create_centroids.py`) sums counts and CP10K per cluster at every resolution.
 Sums pool, so any union of clusters is the sum of its rows, and `log1p(X / n_cells)` is
 comparable to the `ln(mean + 1)` reference centroids.
 
-Still to do now:
-
-- Add top marker genes per cluster; the report does not show them yet.
+Marker genes per cluster are not part of this phase: they are computed at the resolution being
+annotated, as the first section of Phase C's half of the notebook.
 
 ### Sweeps for later
 
@@ -156,7 +164,7 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 | Normalization | Section median, then log1p | CP10K; dividing by cell volume | Whether clusters still track cell size or transcript count rather than type |
 | PCs | 30 | 20 to 50 | Variance explained per PC; how much the clusters change |
 | Neighbours | k = 15 | 10 to 50 | How much the clusters change |
-| Resolution | 1.0 | 0.1 to 2.0, already written | Agreement between neighbouring resolutions (adjusted Rand index); whether a split gives clusters with distinct markers; how pure each cluster's Phase C calls are |
+| Resolution | 0.5, 1.0, 1.5, 2.0; 1.0 annotated | 0.1 to 2.0 in steps of 0.1 | Agreement between neighbouring resolutions (adjusted Rand index); whether a split gives clusters with distinct markers; how pure each cluster's Phase C calls are |
 | Seed | 0 | Several | Agreement across seeds at the chosen resolution |
 
 Two checks apply to most rows: how stable the clusters are, and how cleanly Phase C can name them.
