@@ -122,6 +122,15 @@ Phase C step 9, restarted from its raw counts rather than reusing the section-wi
 continuous trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether
 its clusters are fine enough to match the reference's types.
 
+### Plots
+
+1. **PCA variance explained per component,** to show the 30 PCs are enough.
+2. **UMAP coloured by cluster,** one panel per resolution.
+3. **Cluster sizes** per resolution, as a bar chart of cells per cluster.
+4. **UMAP coloured by transcript count,** to show whether clusters track depth rather than type.
+5. **Clusters drawn on tissue,** at the resolution annotated, to show whether they are spatially
+   coherent.
+
 ### Sweeps for later
 
 Not now. Where the defaults could be swept, and what would show a choice is better:
@@ -217,6 +226,20 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
    The germ-cell subclusters are a continuum that Leiden cuts at arbitrary points, so the
    fine level may flag more clusters than the major one; its purity threshold is tested on its
    own (see the sweeps below).
+
+### Plots
+
+At the major level, then again at the fine level for each subclustered type:
+
+1. **Genes shared** between the panel and the reference, as a count.
+2. **Cluster composition,** a heatmap of each cluster's share of cells per called type, with the
+   purity threshold marked.
+3. **Marker genes per cluster,** a dot plot of each cluster's top markers.
+4. **UMAP coloured by cluster call,** with Ambiguous clusters picked out.
+5. **Calls drawn on tissue,** for the major types, to check where each type sits: germ cells
+   inside tubules and Leydig cells outside them.
+6. **Cells per call and per exclusion,** a bar chart of cells by type, and of how many were
+   excluded at each level.
 
 ### References
 
