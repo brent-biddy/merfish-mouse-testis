@@ -19,38 +19,8 @@ The per-section analysis is one Quarto notebook rather than the `bin/` scripts, 
 section at a time in phase order. It starts from the store and table steps 1a and 1b already
 wrote; the steps after those are a reference for the recipe, not what runs.
 
-**One object passes through the whole notebook.** Section 1 loads the section's table as a
-single AnnData, and every later section adds to that same object rather than making a new one:
-raw counts kept in `layers["counts"]` before normalization overwrites `X`, embeddings in
-`obsm`, clusters, scores and calls in `obs`, markers and parameters in `uns`. A checkpoint is
-that object written to disk, and loading one puts the notebook back where it was. The
-SpatialData store's images and boundaries are not loaded into it; tissue figures read the
-shapes they need from the store when they draw.
-
-Memory clean-up is not planned. Adding to one object in place leaves no stale copies to free,
-and the object is small: about 147,000 cells by 491 genes is under 300 MB dense, plus the
-neighbour graph. Two habits keep it that way: no `adata.copy()` per section, and anything big
-that is only needed briefly, such as a full reference dataset, is deleted once used.
-
-Each section caches its result as an on-disk checkpoint: a file (`.h5ad`, `.parquet`) named
-by a key built from that section's parameters and the key of the section before it. A section
-whose file exists loads it instead of recomputing, so editing a later section never reruns an
-earlier one, and changing a parameter reruns only that section and the ones after it. A code
-change the parameters do not capture needs the checkpoint deleted, or the section's code
-hashed into its key. The checkpoints are ordinary files, readable outside the notebook.
-
-The checkpoints are the notebook's intermediate results, written into `results/` like the
-pipeline's and gitignored with it:
-
-```
-results/<notebook>/<sample>/<section>/<sample>.<section>.<key>.<ext>
-```
-
-The layout is the pipeline's `results/<run_id>/<sample>/<step>/` with the notebook's name in
-place of the run id. A timestamped run id would start every render in an empty directory and
-find nothing to load; a fixed one lets each render reuse what the last one wrote. The key in
-the filename keeps results from different parameters side by side rather than overwriting
-each other.
+How the notebook is built (its sections, checkpoints, and where they are written) is in
+`NOTEBOOK.md`; this file is what the analysis does.
 
 ## Phase A — Segmentation and data QC
 
@@ -115,40 +85,10 @@ Step 4 (`bin/create_centroids.py`) sums counts and CP10K per cluster at every re
 Sums pool, so any union of clusters is the sum of its rows, and `log1p(X / n_cells)` is
 comparable to the `ln(mean + 1)` reference centroids.
 
-### Notebook sections
-
-1. Load the section's table
-2. Filter cells
-3. Normalize
-4. PCA, neighbours and UMAP
-5. Leiden clustering at 0.5, 1.0, 1.5 and 2.0
-
-   **Checkpoint 1, clustered:** the filtered table with a cluster column per resolution.
-
-Changing anything here reruns sections 2 to 5, and invalidates Phase C's checkpoint 2 with it,
-since that key includes checkpoint 1's. Marker genes are not computed here: they depend on
-the resolution being annotated, so they are Phase C's first section.
-
-Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
-cheap, and because Phase C can then try another resolution without reclustering. 1.0 may turn
-out too coarse once annotation narrows down to finer types: germ cells are a continuous
+Four resolutions are written so annotation can move to another without reclustering. 1.0 may
+turn out too coarse once annotation narrows down to finer types: germ cells are a continuous
 trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether its
 clusters are fine enough to match the reference's types.
-
-A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
-or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
-b2r0 turns out slow.
-
-**The notebook starts on CPU (scanpy).** b2r0 has about 147,000 cells after filtering, over
-491 genes, which CPU clusters in minutes, and a CPU job runs on any OSCER node or locally with
-little or no wait.
-
-GPU (rapids-singlecell, as step 2 used) is the option if clustering becomes the slow part. It
-clusters faster, but OSCER's GPU queue is the wait: step 2's jobs on `sooner_gpu_test` were
-scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no queue.
-rapids-singlecell mirrors scanpy's API, so moving over is a switch in the notebook rather than
-a rewrite. The two Leiden implementations do not give identical clusters, so the backend is
-part of checkpoint 1's key.
 
 ### Sweeps for later
 
@@ -192,8 +132,8 @@ the per-cell calls, on defaults.
 5. **Cluster call.** A cluster is named when one type takes at least 90% of its cells. Below
    that it is called Ambiguous, and gets its own slide laying out the evidence. The earlier
    report used 70% (`PURITY_THRESHOLD`); 90% asks for a much clearer majority.
-6. **Cluster markers, alongside.** Each cluster's top marker genes, from notebook section 7,
-   are shown next to its composition to see whether they are informative. They are not used to
+6. **Cluster markers, alongside.** Each cluster's top marker genes, at the resolution being
+   annotated, are shown next to its composition to see whether they are informative. They are not used to
    make or check a call, and no marker list is defined for the reference cell types.
 
 | Reference | Species | Cell types | Values | Fit for this plan |
@@ -203,9 +143,9 @@ the per-cell calls, on defaults.
 
 **One reference at a time.** The reference is a setting of the notebook, Green or Shami, and a
 run annotates against that one only. **The first runs use Green's 11 major types.** Comparing
-the annotations the two give is left for later; because each reference gets its own
-checkpoint, that comparison needs no rerun. Finer types come later, by narrowing down from the major types rather than calling every cell
-against every subtype at once (see *Narrowing down*, below).
+the annotations the two give is left for later; each reference's annotation is kept, so that
+comparison needs no rerun. Finer types come later, by narrowing down from the major types
+rather than calling every cell against every subtype at once (see *Narrowing down*, below).
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
 RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/)):
@@ -258,8 +198,8 @@ The reference notebook maps them to their older names rather than dropping them.
 **Narrowing down, after the first annotation.** A cluster called as one major type is taken
 on its own, reclustered, and its subclusters annotated against the finer level for that type:
 germ cells against GC1-12, and Sertoli cells or spermatogonia against their subtypes if those
-are used. The same composition rule applies to the subclusters. This runs after checkpoint 2,
-adds its subclusters and calls to the same object, and is planned in detail once the major-type
+are used. The same composition rule applies to the subclusters. This runs after the major-type
+annotation, adds its subclusters and calls to the same object, and is planned in detail once the major-type
 annotation is done. The major types already give the germ-cell order Phase E checks (SPG,
 spermatocytes, round spermatids, elongating); staging (Phase F) is what needs the finer level.
 
@@ -272,26 +212,6 @@ markers to see whether the two agree.
 
 Calls must mean the same thing in every section for Phase I. The same reference and the same
 90% threshold in every section are what make them comparable.
-
-### Notebook sections
-
-Numbering continues from Phase B's.
-
-6. Choose the resolution to annotate, 1.0 to start
-7. Marker genes per cluster, at that resolution
-8. Per-cell correlation against the chosen reference
-9. Cluster composition of the per-cell calls
-10. Cluster calls
-
-    **Checkpoint 2, annotated:** the whole table, with everything sections 1 to 10 added: the
-    clusters at every resolution, the markers, every `corr_<type>` score, the per-cell calls and
-    the cluster calls. The later phases read whichever columns they need from it, so which
-    label each one uses is decided when that phase is built.
-
-Changing the resolution, the markers, the correlation or the calls reruns only sections 6 to
-10, starting from checkpoint 1, so annotation is iterated on without reclustering. The
-resolution, the reference and the purity threshold are all part of checkpoint 2's key, so a run
-with each reference leaves its own checkpoint 2 side by side.
 
 ### Sweeps for later
 
