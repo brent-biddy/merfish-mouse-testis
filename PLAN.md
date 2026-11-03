@@ -11,6 +11,11 @@ phases A to F are settled there first, then run on the remaining 15 sections, an
 once every section is through F. Anything learned on the later sections that changes a step
 goes back to b2r0 too, so all 16 are analysed the same way.
 
+The per-section analysis is one Quarto notebook rather than the `bin/` scripts, built up a
+section at a time in phase order, with each section's result cached so editing a later one
+does not recompute the earlier ones. It starts from the store and table steps 1a and 1b
+already wrote; the steps after those are a reference for the recipe, not what runs.
+
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
 ## Phase A1 — Segmentation and data QC
@@ -31,9 +36,8 @@ The report's existing QC section stays as a first look. Ideas for when this is p
 
 **Scope:** Per section, with one default recipe for every section.
 
-Step 2 (`bin/cluster_spatialdata_gpu.py`) clusters each section on the GPU with
-rapids-singlecell. For now every section runs the step's defaults unchanged, and the report
-reads resolution 1.0 (`RESOLUTION`) for all of them; the parameters are not tuned yet.
+The notebook starts from the recipe step 2 (`bin/cluster_spatialdata_gpu.py`) uses, as a
+default for every section, read at resolution 1.0; the parameters are not tuned yet.
 
 | Stage | Default |
 |---|---|
@@ -190,3 +194,4 @@ or mixed models with animal as a random effect. Sections from one animal are not
 - [ ] Where tubule polygons are stored, given the store is write-once
 - [ ] Has the collaborator staged any of these sections?
 - [ ] Which ligand-receptor pairs the panel covers
+- [ ] Notebook caching: on-disk checkpoints per section, Quarto's own cache, or both
