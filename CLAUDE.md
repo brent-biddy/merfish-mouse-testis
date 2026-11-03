@@ -70,6 +70,19 @@ of that safety net was relying on `apptainer` config merging correctly between
 
 Add `-stub` to check wiring without doing the work.
 
+### Working on OSCER
+
+The repo is `/ourdisk/hpc/lilab/babiddy/dont_archive/merfish-mouse-testis`, with the data
+beside it in `merfish-mouse-testis-data` and under `alex_vizgen/ahs_vizgen`.
+
+Open a shared connection from your own terminal: `ssh-add ~/.ssh/id_ed25519` then
+`ssh -fN oscer`. It closes after 30 idle minutes; `ssh -O exit oscer` closes it sooner. Keep
+heavy work off the login node and run it through Slurm. Nextflow comes from
+`module load Nextflow/24.10.2`, or from your conda env.
+
+The checkout's `origin` is `merfish_testis.git`, not `merfish-mouse-testis.git`. Pulls work,
+but it is probably stale.
+
 ### How artifacts are named
 
 Every artifact is `<sample>.<step>.<ext>` — `u2os_test.cluster_spatialdata_gpu.h5ad`, not
@@ -228,8 +241,9 @@ before writing anything: each label's voxels in the raster must equal the volume
 
 **merge.py's raster is not always the whole mosaic.** For some sections it was cut to the
 FOVs' bounding box plus a 400-pixel buffer, so its pixel (0, 0) sits elsewhere in the
-mosaic. Of the fourteen runs only c1r1 is cut this way: its raster is 49,433 x 43,814
-against a 48,867 x 43,227 mosaic, and starts 270 rows above and 293 columns left of it.
+mosaic. Two of the runs are cut this way. c1r1's raster is 49,433 x 43,814
+against a 48,867 x 43,227 mosaic, and starts 270 rows above and 293 columns left of it
+(offset `-270,-293`); a1r0's offset is `-245,-290`, covered below.
 The samplesheet's optional `label_offset` column says where, as `"ROWS,COLUMNS"` in mosaic
 pixels of the raster's (0, 0) -- quoted, since the value holds a comma; blank means 0.
 The figure comes from Alex Vargo's `section.py` (`generate_segmentation_offsets`, over the
@@ -294,6 +308,33 @@ and peaked at 21.3 GB reading `labels.npy` under `wsl`, and its counts, metadata
 transcripts are byte-identical to the single pass's. It has no per-step override, so on
 `oscer` it takes the retry ladder — 48 GB on the first attempt, which is enough, and 32 GB
 more on each of the three retries — and locally it takes the 16 GB default, which is not.
+
+**a1r0 holds two tissue sections in one region,** so merge.py wrote one raster, one label map
+and one counts matrix for both: 241,623 cells, 84,563 above the cut and 157,060 below. Step 1a
+takes a region as one sample, so `bin/split_cellpose_section.py` cuts the segmentation in two
+first. It is run once, directly, and is not a Nextflow step.
+
+The cut is `global_y` 3520 microns, which is mosaic row 33,500, from Alex Vargo's
+`xscript-metafile-creation.py`. Transcripts follow his rule exactly: the lower section is
+`global_y > 3520` and the upper is the rest. A cell goes to the upper section when its centre
+is above the line, and a cell whose bounding box crosses it stops the run. The raster is
+cropped, with a label offset of `-245,-290`, and prep's offset check fails at `0,0`. The lower
+section's raster starts at the cut, so its offset is `33500,-290`; the script prints both and
+writes them to `split_cellpose_section.json`.
+
+It writes a segmentation directory and a region copy for each section, the copy holding only
+that section's transcripts, so step 1a needs no change:
+
+```bash
+apptainer exec oras://ghcr.io/brent-biddy/python_cpu-sif:1.0.2 \
+    python bin/split_cellpose_section.py \
+        --cellpose_path cellposetest --prefix a1r0 \
+        --region_path A1/region_0 --label_offset=-245,-290 --split_y 3520 \
+        --upper_name a1r0-upper --lower_name a1r0-lower --outdir a1r0_split
+```
+
+Then add one row per section to `assets/samplesheet_cellpose_prep.csv`: `path` set to
+`<outdir>/regions/<name>`, `cellpose_path` to `<outdir>/<name>`, and the offset printed above.
 
 ### 1b. create_spatialdata_cellpose
 
