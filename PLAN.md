@@ -2,10 +2,10 @@
 
 ## The data
 
-Each sample is one section of mouse testis, from young and old animals, measured with spatial
-transcriptomics: a panel of 491 genes read out in place across the tissue. Cells were segmented
-in 3D with cellpose by the lab's own pipeline, and each transcript was assigned to the cell it
-falls in. There are 16 sections. The analysis below is written for one section; only the last
+Each sample is one section of mouse testis, measured with spatial transcriptomics: a panel of
+491 genes read out in place across the tissue. Cells were segmented in 3D with cellpose by the
+lab's own pipeline, and each transcript was assigned to the cell it falls in. There are 16
+sections, from young and old animals. The analysis below is written for one section; only the last
 phase brings sections together.
 
 ## The biology
