@@ -2,18 +2,11 @@
 
 ## The data
 
-Each sample is one section of adult mouse testis, imaged on a Vizgen MERSCOPE. MERFISH reads out
-a panel of 491 genes, plus blank barcodes that measure false detections, as
-individual transcripts with their x, y and z positions across seven focal planes. The
-instrument also images the tissue itself, as mosaic images of the whole section.
-
-Cells were segmented in 3D with cellpose by the lab's own pipeline, and each transcript was
-assigned to the cell it falls in. What a section gives the analysis is a table of cells, on the
-order of 100,000 to 150,000 of them, each with its gene counts, its position, its volume and its outline in the
-tissue. Of the seven planes, a cell's outline is drawn from the one it covers most.
-
-There are 16 such sections, from young and old animals, all from one collaborator's dataset.
-The analysis below is written for one section; only the last phase brings sections together.
+Each sample is one section of mouse testis, from young and old animals, measured with spatial
+transcriptomics: a panel of 491 genes read out in place across the tissue. Cells were segmented
+in 3D with cellpose by the lab's own pipeline, and each transcript was assigned to the cell it
+falls in. There are 16 sections. The analysis below is written for one section; only the last
+phase brings sections together.
 
 ## The biology
 
@@ -32,7 +25,7 @@ sample of the whole cycle, spread across its tubules.
 
 ## The analysis
 
-Because MERFISH measures expression in every cell in place, a section can be read at all of
+Because expression is measured in every cell in place, a section can be read at all of
 these levels at once. For a section, the analysis:
 
 1. **Identifies every cell** by its expression: which somatic or germ cell type it is (Phases A
