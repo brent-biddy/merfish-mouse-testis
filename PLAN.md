@@ -73,6 +73,19 @@ cheap, and because 1.0 may be too coarse for the Green reference: the earlier b2
 cells are a continuous trajectory that Leiden cuts at arbitrary points, so what a resolution is
 judged by is whether its clusters are fine enough to match the reference's types.
 
+**One object passes through the whole notebook.** Section 1 loads the section's table as a
+single AnnData, and every later section adds to that same object rather than making a new one:
+raw counts kept in `layers["counts"]` before normalization overwrites `X`, embeddings in
+`obsm`, clusters, scores and calls in `obs`, markers and parameters in `uns`. A checkpoint is
+that object written to disk, and loading one puts the notebook back where it was. The
+SpatialData store's images and boundaries are not loaded into it; tissue figures read the
+shapes they need from the store when they draw.
+
+Memory clean-up is not planned. Adding to one object in place leaves no stale copies to free,
+and the object is small: about 147,000 cells by 491 genes is under 300 MB dense, plus the
+neighbour graph. Two habits keep it that way: no `adata.copy()` per section, and anything big
+that is only needed briefly, such as a full reference dataset, is deleted once used.
+
 A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
 or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
 b2r0 turns out slow.
