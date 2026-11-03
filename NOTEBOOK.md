@@ -1,11 +1,13 @@
 # Notebook design
 
-How the per-section Quarto notebook is built. `PLAN.md` is what the analysis does and in what
-order; this file is how the notebook carries it out. Only Phases B and C are designed so far.
+How the analysis notebook is built. `PLAN.md` is what the analysis does and in what order;
+this file is how the notebook carries it out. Only the reference and Phases B and C are designed
+so far.
 
-The per-section analysis is one Quarto notebook rather than the `bin/` scripts, built up a
-section at a time in phase order. It starts from the store and table steps 1a and 1b already
-wrote; the later steps are a reference for the recipe, not what runs.
+The analysis is one self-contained Quarto notebook, run once per section. It calls no `bin/`
+scripts: everything from building the reference to the cluster calls is code in the notebook,
+built up a section at a time in phase order. Its input is the store and table the segmentation
+steps (1a and 1b) already wrote for the section.
 
 ## One object
 
@@ -46,6 +48,28 @@ each other.
 
 ## Sections
 
+### Reference
+
+0. Build or load the reference
+
+   **Reference checkpoint:** one centroid table per reference level, shared by every section.
+
+The first section any run reaches. If the reference's checkpoint exists it is loaded, a table of
+a few hundred genes by eleven types; if not, it is built from the source data and saved, so the
+first section run builds it and the other fifteen load it. Its key holds the reference and its
+level but no sample, which is what lets every section share it, and it is written at
+`results/<notebook>/reference/` rather than under a sample.
+
+Building Green downloads the GSE112393 files, computes each level's centroids over the 491
+panel genes, and deletes the full dataset once the table is saved, so it never stays in the
+notebook's memory. Seven panel genes are missing from the counts under the panel's names, and
+nine from the germ-cell spreadsheet, being newer symbols for renamed genes (`Prxl2a`, `Plpp3`,
+`Mesd`, `Meioc`, ...); they are mapped to their older names rather than dropped. Shami is
+already a centroid table in the repo, so its section 0 only loads it.
+
+The reference is loaded into the one object's `uns` beside the analysis, so a checkpoint records
+which reference its calls were made against.
+
 ### Phase B, clustering
 
 1. Load the section's table
@@ -58,7 +82,7 @@ each other.
 
 Changing anything here reruns sections 2 to 5, and invalidates Phase C's checkpoint 2 with it,
 since that key includes checkpoint 1's. Marker genes are not computed here: they depend on
-the resolution being annotated, so they are Phase C's first section.
+the resolution being annotated, so they belong to Phase C.
 
 A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
 or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
@@ -88,20 +112,9 @@ with each reference leaves its own checkpoint 2 side by side.
 491 genes, which CPU clusters in minutes, and a CPU job runs on any OSCER node or locally with
 little or no wait.
 
-GPU (rapids-singlecell, as step 2 used) is the option if clustering becomes the slow part. It
-clusters faster, but OSCER's GPU queue is the wait: step 2's jobs on `sooner_gpu_test` were
-scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no queue.
+GPU (rapids-singlecell, as the earlier pipeline used) is the option if clustering becomes the
+slow part. It clusters faster, but OSCER's GPU queue is the wait: the earlier pipeline's GPU
+jobs on `sooner_gpu_test` were scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no queue.
 rapids-singlecell mirrors scanpy's API, so moving over is a switch in the notebook rather than
 a rewrite. The two Leiden implementations do not give identical clusters, so the backend is
 part of checkpoint 1's key.
-
-## Reference notebook
-
-The Green references are built once, in a notebook of their own, not in the per-section one.
-It downloads the GSE112393 files and writes each reference level as its own centroid table to
-`assets/reference/`, the same shape as Shami's. Every per-section notebook loads those small
-tables rather than the full dataset, which is never in its memory.
-
-Seven panel genes are missing from the counts under the panel's names, and nine from the
-germ-cell spreadsheet, being newer symbols for renamed genes (`Prxl2a`, `Plpp3`, `Mesd`,
-`Meioc`, ...). The reference notebook maps them to their older names rather than dropping them.

@@ -11,15 +11,17 @@ phases A to H are settled there first, then run on the remaining 15 sections, an
 once every section is through H. Anything learned on the later sections that changes a step
 goes back to b2r0 too, so all 16 are analysed the same way.
 
-This file is what the analysis does and in what order. `NOTEBOOK.md` is how the notebook that
-runs it is built, and `NOTES.md` tracks where the runs stand.
+The whole analysis runs in one self-contained Quarto notebook, no `bin/` scripts, starting from
+the store and table the segmentation steps already wrote. This file is what the analysis does and
+in what order. `NOTEBOOK.md` is how the notebook is built, and `NOTES.md` tracks where the runs
+stand.
 
 ## Phase A — Segmentation and data QC
 
 **Scope:** Per section.
 
 **Deferred.** The segmentations already run are accepted as they are, and the analysis moves on.
-The report's existing QC section stays as a first look. Nothing is filtered on QC yet beyond
+The earlier report's QC section is a first look. Nothing is filtered on QC yet beyond
 Phase B's low count cut.
 
 ### Sweeps for later
@@ -50,32 +52,28 @@ and does removing them change the clusters or the Phase C calls.
 untuned, so the analysis can move on to the tubule phases. Where a sweep could improve them, and
 how to judge it, is noted at the end of each section and left for later.
 
-The notebook starts from the recipe step 2 (`bin/cluster_spatialdata_gpu.py`) uses, as a
-default for every section, clustered at four resolutions and annotated at 1.0.
+One default recipe runs on every section, clustered at four resolutions and annotated at 1.0.
+It is the recipe the earlier pipeline used, carried over.
 
 | Stage | Default |
 |---|---|
-| Filter, low | Drop cells under 20 transcripts (`--min_counts`) |
-| Filter, high | Off (`--max_counts_quantile`); when on, the top quantile of transcript counts is dropped for doublets and merged cells, taken before the low cut |
+| Filter, low | Drop cells under 20 transcripts |
+| Filter, high | Off; when on, the top quantile of transcript counts is dropped for doublets and merged cells, taken before the low cut |
 | Genes | All panel genes kept: no highly-variable selection and no gene filter, since the 491-gene panel is already curated |
 | Normalize | Total counts scaled to the section's median cell total, then log1p |
 | Scale | Unit variance, not centred, clipped at 10 |
 | PCA | 30 components |
-| Neighbors | Cosine distance, rapids default k = 15 |
+| Neighbors | Cosine distance, k = 15 |
 | UMAP | On that graph |
 | Leiden | Resolutions 0.5, 1.0, 1.5 and 2.0, all written; 1.0 is the one annotated; random seed 0 throughout |
 
 Each resolution leaves two columns. `_v0` is Leiden's own labelling; `_v1` renumbers clusters
 1..k by size, so cluster 1 is the largest. **v1 is what every call and figure names a cluster
-by.** The report adds a render-only `v2`, the cluster's position down the dendrogram, so
+by.** Figures add a display-only `v2`, the cluster's position down the dendrogram, so
 neighbouring numbers are transcriptionally similar; figures read `v1 (v2)`.
 
 Normalizing to each section's own median makes log-normalized values a per-section scale.
 Anything compared across sections starts from counts.
-
-Step 4 (`bin/create_centroids.py`) sums counts and CP10K per cluster at every resolution.
-Sums pool, so any union of clusters is the sum of its rows, and `log1p(X / n_cells)` is
-comparable to the `ln(mean + 1)` reference centroids.
 
 Four resolutions are written so annotation can move to another without reclustering. 1.0 may
 turn out too coarse once annotation narrows down to finer types: germ cells are a continuous
@@ -108,30 +106,32 @@ decided by the same sweeps.
 cohort.
 
 Every cell is correlated against a reference, and each cluster is then named from the mix of
-its cells' calls alone. The notebook follows step 3's method (`bin/annotate_celltypes.py`) for
-the per-cell calls, on defaults.
+its cells' calls alone. The per-cell method is the earlier pipeline's, carried over.
 
-1. **Per-cell correlation.** Spearman correlation of each
-   cell's raw counts against every reference cell type, over the genes the panel and reference
-   share. Genes match case-insensitively, so mouse `Acta2` finds human `ACTA2`; the matched genes
-   are written to `<sample>.gene_overlap.tsv`.
+0. **Build the reference, once for the cohort.** Before any section is annotated, the reference
+   is built from its source data (below) and saved. Every section after the first reuses the
+   saved copy, so it is built once, not sixteen times.
+1. **Per-cell correlation.** Spearman correlation of each cell's raw counts against every
+   reference cell type, over the genes the panel and reference share. Genes match
+   case-insensitively, so mouse `Acta2` finds human `ACTA2`; which panel genes matched is
+   recorded.
 2. **Standardize within each cell.** A cell's correlation to every type rises with the genes it
    captured, so correlations are z-scored per cell. This cannot change a cell's top type; it
    makes cells comparable with each other.
 3. **Per-cell call.** `cell_type_per_cell` is the type with the highest correlation; every
    type's value is kept as `corr_<type>`.
-4. **Cluster composition (report).** Each cluster's share of cells per called type.
+4. **Cluster composition.** Each cluster's share of cells per called type.
 5. **Cluster call.** A cluster is named when one type takes at least 90% of its cells. Below
-   that it is called Ambiguous, and gets its own slide laying out the evidence. The earlier
-   report used 70% (`PURITY_THRESHOLD`); 90% asks for a much clearer majority.
+   that it is called Ambiguous, and its evidence is laid out on its own. The earlier report
+   used 70%; 90% asks for a much clearer majority.
 6. **Cluster markers, alongside.** Each cluster's top marker genes, at the resolution being
-   annotated, are shown next to its composition to see whether they are informative. They are not used to
-   make or check a call, and no marker list is defined for the reference cell types.
+   annotated, are shown next to its composition to see whether they are informative. They are
+   not used to make or check a call, and no marker list is defined for the reference cell types.
 
 | Reference | Species | Cell types | Values | Fit for this plan |
 |---|---|---|---|---|
 | Green et al. 2018 | Mouse | 11 major types; 32 in the collaborator's copy: 7 somatic, 9 Sertoli subtypes, 4 SPG, 12 germ-cell clusters | ln(mean TP10K + 1); 19 of the collaborator's 32 columns confirmed against GEO | Used first. Resolves the germ-cell stages that layering and staging need |
-| Shami et al. (`shami_human_testis_centroids.csv.gz`) | Human | 11 major types | ln(mean + 1) | The alternative. Too coarse for staging |
+| Shami et al. (the centroid table already in the repo) | Human | 11 major types | ln(mean + 1) | The alternative. Too coarse for staging |
 
 **One reference at a time.** The reference is a setting of the notebook, Green or Shami, and a
 run annotates against that one only. **The first runs use Green's 11 major types.** Comparing
@@ -233,10 +233,8 @@ tubule a polygon.
 - QC per tubule: area, circularity, cell count. Flag tubules cut obliquely, since they distort
   radial position and staging.
 
-Where the polygons live is open: the store is written once by design, so a tubule shapes element
-goes beside the table (GeoParquet, say) or needs an exception. Per-cell columns fit in the table.
-
-Prototype in a notebook on b2r0; promote to a pipeline step once the method settles.
+Per-cell columns go in the table. Tubule polygons are not per cell, so they are saved beside it
+(GeoParquet, say). Worked out on b2r0 first, like every phase.
 
 ## Phase E — Radial layering
 
@@ -302,6 +300,5 @@ or mixed models with animal as a random effect. Sections from one animal are not
       d2, 2a, 2b prefixes mark animals?)
 - [ ] Green reference: whether the unconfirmed SPG and Sertoli subtype columns are used, and if so where they came from
 - [ ] Which image channels exist for tubule segmentation?
-- [ ] Where tubule polygons are stored, given the store is write-once
 - [ ] Has the collaborator staged any of these sections?
 - [ ] Which ligand-receptor pairs the panel covers
