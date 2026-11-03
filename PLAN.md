@@ -6,6 +6,11 @@ cell-type proportions, gene and signalling dynamics, and the interstitium be com
 and finally between young and old animals. Phases A to F run per section;
 only G pools sections.
 
+The analysis is worked out end to end on one section, b2r0, before it touches the others:
+phases A to F are settled there first, then run on the remaining 15 sections, and G follows
+once every section is through F. Anything learned on the later sections that changes a step
+goes back to b2r0 too, so all 16 are analysed the same way.
+
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
 ## Phase A1 — Segmentation and data QC
@@ -98,7 +103,7 @@ threshold).
 
 ## Phase B — Identify tubules
 
-**Scope:** Per section; the method is prototyped on b2r0 first.
+**Scope:** Per section.
 
 Every cell gets a `tubule_id` and a `compartment` (tubule, boundary or interstitium), and every
 tubule a polygon.
