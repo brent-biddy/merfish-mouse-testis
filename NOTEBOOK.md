@@ -6,8 +6,14 @@ reference cache, and CPU or GPU.
 
 The analysis is one self-contained Quarto notebook, run once per section. It calls no `bin/`
 scripts: everything from building the reference to the cluster calls is code in the notebook,
-built up a section at a time in the order of `PLAN.md`'s steps. Its input is the store and table the segmentation
-steps (1a and 1b) already wrote for the section.
+built up a section at a time in the order of `PLAN.md`'s steps. A step is named by phase and
+number, B3 or C5. Its input is the store and table the segmentation steps (1a and 1b) already
+wrote for the section.
+
+It is worked out end to end on one section, b2r0, before it runs on the other 15: every phase
+up to H is settled there first, and Phase I follows once every section is through H. Anything
+learned on a later section that changes a step goes back to b2r0 too, so all 16 are analysed
+the same way. `NOTES.md` tracks where the runs stand.
 
 ## One object
 

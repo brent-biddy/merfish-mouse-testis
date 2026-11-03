@@ -1,21 +1,39 @@
 # Analysis plan
 
-Each of the collaborator's 16 mouse testis sections is analysed on its own: QC,
-clustering and cell-type annotation, then tubules identified, layered and staged. That lets
-cell-type proportions, gene and signalling dynamics, and the interstitium be compared by stage,
-and finally between young and old animals. Phases A to H run per section;
-only I pools sections.
+Sperm are made inside the seminiferous tubules, and a cross-section of mouse testis cuts through
+many of them. Inside each tubule, germ cells mature from the outside in. Spermatogonia sit
+against the basement membrane; spermatocytes above them pass through meiosis; round spermatids
+and then elongating spermatids lie towards the lumen, into which sperm are released. Sertoli
+cells span that whole depth and support every stage. Outside the tubules, peritubular myoid
+cells wrap each one, and the interstitium between them holds Leydig cells, which make
+testosterone, along with macrophages and blood vessels.
 
-The analysis is worked out end to end on one section, b2r0, before it touches the others:
-phases A to H are settled there first, then run on the remaining 15 sections, and I follows
-once every section is through H. Anything learned on the later sections that changes a step
-goes back to b2r0 too, so all 16 are analysed the same way.
+The epithelium does not mature uniformly. It runs through a repeating cycle of twelve stages,
+I to XII in mouse, and each stage is a fixed combination of germ cells at different steps of
+development. A single tubule cross-section sits at one stage, so one section of testis is a
+sample of the whole cycle, spread across its tubules.
 
-The whole analysis runs in one self-contained Quarto notebook, no `bin/` scripts, starting from
-the store and table the segmentation steps already wrote. This file is what the analysis does and
-in what order: each phase decided so far lists its steps, with the functions they call, in the
-order the notebook runs them. A step is named by phase and number, B3 or C5. `NOTEBOOK.md` is
-how the notebook is wired across steps, and `NOTES.md` tracks where the runs stand.
+MERFISH measures 491 genes in every cell, in place, so a section can be read at all of these
+levels at once. For a section, the analysis:
+
+1. **Identifies every cell** by its expression: which somatic or germ cell type it is (Phases A
+   to C).
+2. **Finds the tubules,** places each cell inside or outside one, and orders the cells within a
+   tubule from the basement membrane to the lumen, which should recover the germ cells'
+   developmental order (Phases D and E).
+3. **Stages each tubule** from the germ cells it contains (Phase F).
+4. **Asks how the tubule changes through the cycle:** which cell types are present at each stage,
+   how their gene expression shifts, and how Sertoli and germ cells signal to each other
+   (Phase G).
+5. **Asks how the interstitium relates to the tubule beside it:** where Leydig cells and
+   macrophages sit, and whether their neighbourhood or their signalling across the basement
+   membrane follows that tubule's stage (Phase H).
+
+Repeated over sections from young and old animals, the same measurements show how ageing
+changes the cycle, the tubule and the interstitium (Phase I).
+
+Each phase that is decided lists its steps in order, with the functions they call. `NOTEBOOK.md`
+is how the notebook that runs them is built.
 
 ## Phase A — Segmentation and data QC
 
