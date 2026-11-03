@@ -51,9 +51,18 @@ is how the notebook that runs them is built.
 
 **Scope:** Per section.
 
-**Deferred.** The segmentations already run are accepted as they are, and the analysis moves on.
-The earlier report's QC section is a first look. Nothing is filtered on QC yet beyond
-Phase B's low count cut.
+**Minimal.** The segmentations already run are accepted as they are. This phase only looks: a few
+plots per section, so a bad region or an odd distribution is seen before clustering. Nothing is
+filtered here; the only cut is Phase B's low count cut.
+
+### Plots
+
+1. **Transcripts per cell and genes per cell,** as histograms.
+2. **Cell volume,** as a histogram.
+3. **Blank codewords against real genes,** as the share of each cell's counts that are blanks.
+4. **Transcript count drawn on tissue,** to show FOV seams, edges and damaged areas at a glance.
+
+Anything that looks wrong is noted for the sweeps below, not acted on in this phase.
 
 ### Sweeps for later
 
