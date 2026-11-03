@@ -6,6 +6,10 @@ cell-type proportions, gene and signalling dynamics, and the interstitium be com
 and finally between young and old animals. Phases A to H run per section;
 only I pools sections.
 
+`NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
+
+## How the analysis is run
+
 The analysis is worked out end to end on one section, b2r0, before it touches the others:
 phases A to H are settled there first, then run on the remaining 15 sections, and I follows
 once every section is through H. Anything learned on the later sections that changes a step
@@ -14,6 +18,19 @@ goes back to b2r0 too, so all 16 are analysed the same way.
 The per-section analysis is one Quarto notebook rather than the `bin/` scripts, built up a
 section at a time in phase order. It starts from the store and table steps 1a and 1b already
 wrote; the steps after those are a reference for the recipe, not what runs.
+
+**One object passes through the whole notebook.** Section 1 loads the section's table as a
+single AnnData, and every later section adds to that same object rather than making a new one:
+raw counts kept in `layers["counts"]` before normalization overwrites `X`, embeddings in
+`obsm`, clusters, scores and calls in `obs`, markers and parameters in `uns`. A checkpoint is
+that object written to disk, and loading one puts the notebook back where it was. The
+SpatialData store's images and boundaries are not loaded into it; tissue figures read the
+shapes they need from the store when they draw.
+
+Memory clean-up is not planned. Adding to one object in place leaves no stale copies to free,
+and the object is small: about 147,000 cells by 491 genes is under 300 MB dense, plus the
+neighbour graph. Two habits keep it that way: no `adata.copy()` per section, and anything big
+that is only needed briefly, such as a full reference dataset, is deleted once used.
 
 Each section caches its result as an on-disk checkpoint: a file (`.h5ad`, `.parquet`) named
 by a key built from that section's parameters and the key of the section before it. A section
@@ -34,73 +51,6 @@ place of the run id. A timestamped run id would start every render in an empty d
 find nothing to load; a fixed one lets each render reuse what the last one wrote. The key in
 the filename keeps results from different parameters side by side rather than overwriting
 each other.
-
-`NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
-
-### Notebook sections for Phases B and C
-
-The notebook's first sections, in order, with the two checkpoints marked:
-
-1. Load the section's table
-2. Filter cells
-3. Normalize
-4. PCA, neighbours and UMAP
-5. Leiden clustering at a few resolutions: 0.5, 1.0, 1.5 and 2.0
-
-   **Checkpoint 1, clustered:** the filtered table with a cluster column per resolution.
-
-6. Choose the resolution to annotate, 1.0 to start
-7. Marker genes per cluster, at that resolution
-8. Per-cell correlation against the chosen reference
-9. Cluster composition of the per-cell calls
-10. Cluster calls
-
-    **Checkpoint 2, annotated:** the whole table, with everything sections 1 to 10 added: the
-    clusters at every resolution, the markers, every `corr_<type>` score, the per-cell calls and
-    the cluster calls. The later phases read whichever columns they need from it, so which
-    label each one uses is decided when that phase is built.
-
-The split lets clustering and annotation be iterated on separately. Changing the resolution,
-the markers, the correlation or the calls reruns only sections 6 to 10 from checkpoint 1;
-changing the clustering reruns from section 2 and invalidates checkpoint 2 with it, since its
-key includes checkpoint 1's. The chosen resolution and the chosen reference are part of
-checkpoint 2's key, not checkpoint 1's, so trying another resolution or reference never reclusters, and a run with each reference
-leaves its own checkpoint 2 side by side. The cluster calls follow from
-the composition and the purity threshold, so the threshold is part of checkpoint 2's key too.
-
-Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
-cheap, and because 1.0 may be too coarse for the Green reference: the earlier b2r0 report had
-19 clusters at 1.0, several Ambiguous, against Green's 32 types, 16 of them germ cells. Germ
-cells are a continuous trajectory that Leiden cuts at arbitrary points, so what a resolution is
-judged by is whether its clusters are fine enough to match the reference's types.
-
-**One object passes through the whole notebook.** Section 1 loads the section's table as a
-single AnnData, and every later section adds to that same object rather than making a new one:
-raw counts kept in `layers["counts"]` before normalization overwrites `X`, embeddings in
-`obsm`, clusters, scores and calls in `obs`, markers and parameters in `uns`. A checkpoint is
-that object written to disk, and loading one puts the notebook back where it was. The
-SpatialData store's images and boundaries are not loaded into it; tissue figures read the
-shapes they need from the store when they draw.
-
-Memory clean-up is not planned. Adding to one object in place leaves no stale copies to free,
-and the object is small: about 147,000 cells by 491 genes is under 300 MB dense, plus the
-neighbour graph. Two habits keep it that way: no `adata.copy()` per section, and anything big
-that is only needed briefly, such as a full reference dataset, is deleted once used.
-
-A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
-or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
-b2r0 turns out slow.
-
-**The notebook starts on CPU (scanpy).** b2r0 has about 147,000 cells after filtering, over
-491 genes, which CPU clusters in minutes, and a CPU job runs on any OSCER node or locally with
-little or no wait.
-
-GPU (rapids-singlecell, as step 2 used) is the option if clustering becomes the slow part. It
-clusters faster, but OSCER's GPU queue is the wait: step 2's jobs on `sooner_gpu_test` were
-scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no queue.
-rapids-singlecell mirrors scanpy's API, so moving over is a switch in the notebook rather than
-a rewrite. The two Leiden implementations do not give identical clusters, so the backend is
-part of checkpoint 1's key.
 
 ## Phase A — Segmentation and data QC
 
@@ -166,7 +116,18 @@ Sums pool, so any union of clusters is the sum of its rows, and `log1p(X / n_cel
 comparable to the `ln(mean + 1)` reference centroids.
 
 Marker genes per cluster are not part of this phase: they are computed at the resolution being
-annotated, as the first section of Phase C's half of the notebook.
+annotated, in notebook section 7 (see *Notebook sections for Phases B and C*, after Phase C).
+
+**The notebook starts on CPU (scanpy).** b2r0 has about 147,000 cells after filtering, over
+491 genes, which CPU clusters in minutes, and a CPU job runs on any OSCER node or locally with
+little or no wait.
+
+GPU (rapids-singlecell, as step 2 used) is the option if clustering becomes the slow part. It
+clusters faster, but OSCER's GPU queue is the wait: step 2's jobs on `sooner_gpu_test` were
+scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no queue.
+rapids-singlecell mirrors scanpy's API, so moving over is a switch in the notebook rather than
+a rewrite. The two Leiden implementations do not give identical clusters, so the backend is
+part of checkpoint 1's key (see *Notebook sections for Phases B and C*).
 
 ### Sweeps for later
 
@@ -309,6 +270,47 @@ ranks, so Spearman gives the same answer on any of them.
 
 Whatever the setting, a call can be sanity-checked by where the type sits in tissue, such as
 germ cells inside tubules and Leydig cells outside them.
+
+## Notebook sections for Phases B and C
+
+The notebook's first sections, in order, with the two checkpoints marked:
+
+1. Load the section's table
+2. Filter cells
+3. Normalize
+4. PCA, neighbours and UMAP
+5. Leiden clustering at a few resolutions: 0.5, 1.0, 1.5 and 2.0
+
+   **Checkpoint 1, clustered:** the filtered table with a cluster column per resolution.
+
+6. Choose the resolution to annotate, 1.0 to start
+7. Marker genes per cluster, at that resolution
+8. Per-cell correlation against the chosen reference
+9. Cluster composition of the per-cell calls
+10. Cluster calls
+
+    **Checkpoint 2, annotated:** the whole table, with everything sections 1 to 10 added: the
+    clusters at every resolution, the markers, every `corr_<type>` score, the per-cell calls and
+    the cluster calls. The later phases read whichever columns they need from it, so which
+    label each one uses is decided when that phase is built.
+
+The split lets clustering and annotation be iterated on separately. Changing the resolution,
+the markers, the correlation or the calls reruns only sections 6 to 10 from checkpoint 1;
+changing the clustering reruns from section 2 and invalidates checkpoint 2 with it, since its
+key includes checkpoint 1's. The chosen resolution and the chosen reference are part of
+checkpoint 2's key, not checkpoint 1's, so trying another resolution or reference never reclusters, and a run with each reference
+leaves its own checkpoint 2 side by side. The cluster calls follow from
+the composition and the purity threshold, so the threshold is part of checkpoint 2's key too.
+
+Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
+cheap, and because 1.0 may be too coarse for the Green reference: the earlier b2r0 report had
+19 clusters at 1.0, several Ambiguous, against Green's 32 types, 16 of them germ cells. Germ
+cells are a continuous trajectory that Leiden cuts at arbitrary points, so what a resolution is
+judged by is whether its clusters are fine enough to match the reference's types.
+
+A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
+or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
+b2r0 turns out slow.
 
 ## Phase D — Identify tubules
 
