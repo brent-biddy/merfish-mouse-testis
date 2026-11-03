@@ -218,7 +218,9 @@ the per-cell calls, on defaults.
 | Green et al. 2018 | Mouse | 11 major types; 32 in the collaborator's copy: 7 somatic, 9 Sertoli subtypes, 4 SPG, 12 germ-cell clusters | ln(mean TP10K + 1); 19 of the collaborator's 32 columns confirmed against GEO | Used first. Resolves the germ-cell stages that layering and staging need |
 | Shami et al. (`shami_human_testis_centroids.csv.gz`) | Human | 11 major types | ln(mean + 1) | Run alongside. Too coarse for staging; useful as a cross-check |
 
-**Both references are used, Green first.** Shami is run alongside as a cross-check.
+**Annotation starts at Green's 11 major types,** with Shami run alongside as a cross-check.
+Finer types come later, by narrowing down from the major types rather than calling every cell
+against every subtype at once (see *Narrowing down*, below).
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
 RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/)):
@@ -255,13 +257,26 @@ the 491 panel genes. Every per-section notebook then loads those small tables ra
 full dataset. Two levels come out of it:
 
 - **Green, 11 major types,** recomputed from the counts and labels. Coarse, and every column is
-  reproducible from public data.
-- **Green, fine,** the 7 somatic types and GC1-12 as published. Whether the 13 unconfirmed SPG
-  and Sertoli subtype columns join it is still to decide.
+  reproducible from public data. This is the one the first annotation uses.
+- **Green, fine,** GC1-12 as published, for narrowing down germ cells later. Whether the 13
+  unconfirmed SPG and Sertoli subtype columns join it is still to decide.
+
+Each level is a reference of its own, not one table mixing them. The collaborator's 32 columns
+mix levels: a `Sertoli` column beside nine Sertoli subtypes built from the same cells, and SPG
+subtypes beside germ clusters that include spermatogonia. Calling cells against such a table
+splits a Sertoli cell's vote across ten near-identical columns, and no cluster reaches 90%.
 
 Seven panel genes are missing from the counts under the panel's names, and nine from the
 spreadsheet, being newer symbols for renamed genes (`Prxl2a`, `Plpp3`, `Mesd`, `Meioc`, ...).
 The reference notebook maps them to their older names rather than dropping them.
+
+**Narrowing down, after the first annotation.** A cluster called as one major type is taken
+on its own, reclustered, and its subclusters annotated against the finer level for that type:
+germ cells against GC1-12, and Sertoli cells or spermatogonia against their subtypes if those
+are used. The same composition rule applies to the subclusters. This runs after checkpoint 2,
+adds its subclusters and calls to the same object, and is planned in detail once the major-type
+annotation is done. The major types already give the germ-cell order Phase E checks (SPG,
+spermatocytes, round spermatids, elongating); staging (Phase F) is what needs the finer level.
 
 A possible extra, not planned yet: reference marker genes computed from the reference data
 itself, rather than a list written by hand. How depends on what the reference comes as. With
@@ -279,7 +294,7 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 
 | Parameter | Default | Could try | How to judge it |
 |---|---|---|---|
-| Reference | Green and Shami, both run | Green's 32 types grouped to coarser levels | Agreement on the coarse types both have, once Green's types are grouped to Shami's 11 |
+| Reference level | Green's 11 major types, with Shami | Green's fine level for every cell at once, rather than by narrowing down | Whether the fine calls agree with the narrowed-down ones |
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
 | Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or the computed reference markers | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
