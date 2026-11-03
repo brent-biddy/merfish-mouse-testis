@@ -3,11 +3,14 @@
 Dated 2026-11-02. Each of the collaborator's 16 mouse testis sections is analysed on its own: QC,
 clustering and cell-type annotation, then tubules identified, layered and staged. That lets
 cell-type proportions, gene and signalling dynamics, and the interstitium be compared by stage,
-and finally between young and old animals.
+and finally between young and old animals. Phases A to F run per section;
+only G pools sections.
 
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
 ## Phase A1 — Segmentation and data QC
+
+**Scope:** Per section.
 
 Each section gets a QC pass before any thresholds are set, so a bad region is caught here
 rather than in a figure.
@@ -21,6 +24,9 @@ rather than in a figure.
 The report already has a QC section; the on-tissue QC maps are new.
 
 ## Phase A2 — Filtering and clustering
+
+**Scope:** Per section. Whether the filter thresholds and the resolution are set once for the
+cohort or per section is still open.
 
 Step 2 (`bin/cluster_spatialdata_gpu.py`) clusters each section on the GPU with
 rapids-singlecell, using one fixed recipe, and writes a Leiden sweep rather than a single answer.
@@ -58,6 +64,8 @@ Per section, still to do:
 
 ## Phase A3 — Cell-type annotation
 
+**Scope:** Per section, against one reference and one rulebook fixed for the whole cohort.
+
 Every cell is correlated against a reference, and each cluster is then named by a person from
 the mix of its cells' calls. Step 3 makes no cluster-level call itself.
 
@@ -90,6 +98,8 @@ threshold).
 
 ## Phase B — Identify tubules
 
+**Scope:** Per section; the method is prototyped on b2r0 first.
+
 Every cell gets a `tubule_id` and a `compartment` (tubule, boundary or interstitium), and every
 tubule a polygon.
 
@@ -108,6 +118,8 @@ Prototype in a notebook on b2r0; promote to a pipeline step once the method sett
 
 ## Phase C — Radial layering
 
+**Scope:** Per section.
+
 Each cell in a tubule gets a radial position: 0 at the basement membrane, 1 at the lumen.
 
 - Expected order, outside in: spermatogonia and Sertoli nuclei, spermatocytes, round
@@ -116,6 +128,8 @@ Each cell in a tubule gets a radial position: 0 at the basement membrane, 1 at t
 - Gene expression along the radial axis, within each cell type.
 
 ## Phase D — Stage the tubules
+
+**Scope:** Per section.
 
 Each tubule cross-section sits at one stage of the epithelial cycle (I-XII in mouse), set by
 which germ cells occur together.
@@ -128,6 +142,8 @@ which germ cells occur together.
 
 ## Phase E — Within the tubule, by stage
 
+**Scope:** Per section.
+
 - Cell-type proportions by stage
 - Gene expression across the cycle per cell type, as pseudobulk per tubule ordered by stage
 - Sertoli-germ cell signalling by stage, from ligand-receptor pairs
@@ -136,6 +152,8 @@ Only pairs on the 491-gene panel can be tested; listing which ones are is a chea
 
 ## Phase F — Extratubular cells and the tubule
 
+**Scope:** Per section.
+
 - Interstitial types: Leydig, macrophages (peritubular vs interstitial), endothelial, peritubular
   myoid
 - Neighbourhood enrichment, and each cell's distance to the nearest tubule
@@ -143,6 +161,8 @@ Only pairs on the 491-gene panel can be tested; listing which ones are is a chea
 - Ligand-receptor signalling across the basement membrane
 
 ## Phase G — Young vs old
+
+**Scope:** Over the cohort, sections grouped by animal and animals by age.
 
 - Distribution of tubules across stages
 - Composition within each stage
