@@ -42,33 +42,28 @@ each other.
 **Scope:** Per section.
 
 **Deferred.** The segmentations already run are accepted as they are, and the analysis moves on.
-The report's existing QC section stays as a first look. QC metrics for when this is picked up:
-
-- Cells per section; transcripts, genes and volume per cell
-- Share of transcripts assigned to a cell; blank codewords against real genes
-- Which z-plane each boundary came from (`obs["z_plane"]`), and cells with no polygon
-  (`has_boundary`)
-- The same metrics drawn on tissue, to catch FOV seams, edge effects and damaged areas
-- The metrics compared across sections, pooled, to show an outlier section
+The report's existing QC section stays as a first look. Nothing is filtered on QC yet beyond
+A2's low count cut.
 
 ### Sweeps for later
 
-Not now. Where the segmentation could be varied, and what would show a choice is better. The
-three cellpose rows mean re-running the lab's cellpose pipeline (`area_cellpose.py`,
-`merge.py`) outside this repo, then steps 1a and 1b, so they are the costliest sweeps in the
-plan. Vizgen's own segmentation is already in each region directory and needs only step 1; the
-boundary plane needs only step 1a.
+Not now. QC checks that could become thresholds, and how to judge where to set them. Each
+applies to the segmentation as it stands; none means re-segmenting.
 
-| Parameter | Default | Could try | How to judge it |
+| QC check | Default | Could try | How to judge it |
 |---|---|---|---|
-| Method | 3D cellpose, the lab's | Vizgen's own segmentation of the same region | Share of transcripts assigned; counts per cell; whether clustering and A3 calls agree. Two sample ids in one notebook compare them |
-| Cell diameter | As run | Smaller and larger | Cell size per type against what is expected; split cells (two neighbours, half size, same type) and merged ones (markers of mutually exclusive types together) |
-| Flow and cell-probability thresholds | As run | Looser and stricter | Cells found; share of transcripts assigned; how many small fragments appear |
-| Input stains | As run | DAPI alone; DAPI with a membrane or polyT stain | The same checks as cell diameter |
-| Boundary plane | The plane each cell covers most | One fixed plane | Cells left without a polygon; transcripts falling outside the polygon drawn for their cell |
+| Cell volume | No cut | Drop the smallest and largest cells, by fixed volumes or quantiles | Whether small cells are fragments (few genes, no clear type) and large ones merges (markers of mutually exclusive types) |
+| Genes per cell | No cut | A minimum, alongside A2's count cut | Whether the cells it drops cluster together or are scattered through every type |
+| Blank codewords per cell | No cut | A maximum share of a cell's counts | Blanks against real genes per section; whether high-blank cells sit in one area of tissue |
+| Transcripts assigned to a cell | Not checked | A minimum share per section or per FOV | Share per FOV drawn on tissue; a low area points at a segmentation or imaging fault |
+| Cells with no polygon | Kept | Dropped | How many there are (`has_boundary`); whether their calls differ from cells with one |
+| Boundary plane | Every plane kept | Drop cells whose boundary is on the top or bottom plane (`obs["z_plane"]`) | Whether those cells have fewer counts or different calls |
+| FOV seams and tissue edges | Kept | Drop cells within a set distance of a seam or edge | The QC metrics drawn on tissue; whether seam and edge cells are lower in counts or odd in type |
+| Damaged areas | Kept | Mask regions by hand or by low transcript density | The same tissue maps |
+| Outlier sections | All kept | Flag a section whose metrics sit apart from the rest | The metrics compared across sections, pooled |
 
-The default values for the cellpose rows are whatever the lab's runs used; they are not
-recorded in this repo yet.
+Every row is judged by the same two questions: are the cells it removes worse than the rest,
+and does removing them change the clusters or the A3 calls.
 
 ## Phase A2 — Filtering and clustering
 
