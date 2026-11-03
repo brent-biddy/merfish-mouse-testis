@@ -1,8 +1,9 @@
 # Notebook design
 
-How the analysis notebook is wired. `PLAN.md` lists its steps in order, with the functions each
-one calls; this file is what cuts across those steps: the one object, the checkpoints, the
-reference cache, and CPU or GPU.
+How the analysis notebook is wired. `PLAN.md` lists its steps in order and what each one
+decides; this file is how they are coded: the calls and column names for each step, and what
+cuts across them: the one object, the checkpoints, the reference cache, and CPU or GPU. The
+recipe is the earlier pipeline's, carried over, on scanpy (`sc`).
 
 The analysis is one self-contained Quarto notebook, run once per section. It calls no `bin/`
 scripts: everything from building the reference to the cluster calls is code in the notebook,
@@ -84,6 +85,43 @@ with the same parameters. Only the filter (B2) is skipped, since those cells alr
 - Four resolutions are written at each level so annotation can move to another without
   reclustering.
 
+## Step code and column names
+
+Keyed by the step numbers in `PLAN.md`. The per-cell method in Phase C is the earlier
+pipeline's, carried over.
+
+**Phase B**
+
+| Step | Code |
+|---|---|
+| B1 | `adata = anndata.read_h5ad(table_path)`; `adata.layers["counts"] = adata.X.copy()` |
+| B2 | `sc.pp.filter_cells(adata, min_counts=20)`. The high cut's threshold is `adata.obs["transcript_count"].quantile(q)`, taken before the low cut, then `sc.pp.filter_cells(adata, max_counts=threshold)` |
+| B3 | `sc.pp.normalize_total(adata)`, `sc.pp.log1p(adata)`; then `adata.layers["lognorm"] = adata.X.copy()` |
+| B4 | `sc.pp.scale(adata, zero_center=False, max_value=10)` |
+| B5 | `sc.pp.pca(adata, n_comps=30, random_state=0)` |
+| B6 | `sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)` |
+| B7 | `sc.tl.umap(adata, random_state=0)` |
+| B8 | For each resolution `r`: `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph", n_iterations=2, random_state=0)`, then our own `relabel_by_size()` renumbers the clusters 1..k by size |
+
+**Phase C**
+
+| Step | Code |
+|---|---|
+| C0 | Built per reference as described under the reference cache below; the chosen one is stored in `adata.uns["reference"]` |
+| C1 | `cluster_key = "leiden_1.0"` |
+| C2 | `sc.tl.rank_genes_groups(adata, groupby=cluster_key, layer="lognorm", method="wilcoxon")`, read back with `sc.get.rank_genes_groups_df` |
+| C3 | `scipy.stats.rankdata(adata[:, shared].layers["counts"], axis=1)` for the cells, the same for each reference type, then `1 - scipy.spatial.distance.cdist(cell_ranks, type_ranks, metric="correlation")`. `shared` is matched case-insensitively |
+| C4 | Subtract each cell's mean correlation and divide by its standard deviation; write `adata.obs[f"corr_{type}"]` for every type |
+| C5 | `idxmax(axis=1)` over the standardized correlations, written to `adata.obs["cell_type"]` |
+| C6 | `pd.crosstab(adata.obs[cluster_key], adata.obs["cell_type"], normalize="index")`, kept in `adata.uns` |
+| C7 | The call goes to `adata.obs["cluster_type"]`; how it was made to `adata.obs["cluster_call_source"]`, one of `auto`, `manual` or `unresolved` |
+| C8 | A manual call is written to `cluster_type` with source `manual`. A cluster left unresolved keeps `Ambiguous` with source `unresolved`, and its cells get `adata.obs["excluded"] = True` and `adata.obs["excluded_at"] = "major"` |
+| C9 | `cluster_cells` on one major type's cells, then C3 to C8 on the result. The output is `adata.obs["fine_cell_type"]`. A type with no fine reference keeps its major label there, with `adata.obs["fine_source"] = "major"`. An unresolved subcluster's cells get `excluded_at = "fine"` |
+
+Phases D to I read `fine_cell_type` and drop cells where `excluded` is set. In Phase D, per-cell
+results (`tubule_id`, `compartment`) go in the table, and the tubule polygons are saved beside
+it as GeoParquet.
+
 ## The reference cache
 
 C0 is the first step any run reaches that needs the reference. Its checkpoint is written at
@@ -92,6 +130,18 @@ and the other fifteen load a table of a few hundred genes by eleven types. The f
 is read in chunks and dropped once the table is saved, so it never stays in memory. The
 reference is also stored in the object's `uns`, so a checkpoint records which reference its
 calls were made against.
+
+How C0 builds each one:
+
+- *Green, 11 major types:* read the GEO counts in chunks, `pd.read_csv(dge, sep="\t",
+  index_col=0, chunksize=...)`, summing every cell's total over all genes and keeping only the
+  panel genes' rows. Read the per-cell types with `pd.read_csv(attributes, sep="\t",
+  comment="#", header=None)`. Then TP10K = panel counts / cell total x 10,000, mean per type
+  with `groupby(...).mean()`, and `np.log1p`.
+- *Green, GC1-12:* `pd.read_excel(xlsx, sheet_name="Average")`, the panel genes' rows.
+- *Shami:* `pd.read_csv` of the table already in the repo.
+- Panel genes renamed since the reference was made are mapped to the names it uses, with our
+  own `match_panel_genes()`, rather than dropped.
 
 The GEO files, as checked on 2026-11-03:
 

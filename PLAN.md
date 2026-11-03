@@ -44,8 +44,8 @@ these levels at once. For a section, the analysis:
 Repeated over sections from young and old animals, the same measurements show how ageing
 changes the cycle, the tubule and the interstitium (Phase I).
 
-Each phase that is decided lists its steps in order, with the functions they call. `NOTEBOOK.md`
-is how the notebook that runs them is built.
+Each phase that is decided lists its steps in order, and what each one decides. `NOTEBOOK.md`
+is how the notebook that runs them is built, with the code and the column names for each step.
 
 ## Phase A — Segmentation and data QC
 
@@ -75,8 +75,8 @@ applies to the segmentation as it stands; none means re-segmenting.
 | Genes per cell | No cut | A minimum, alongside Phase B's count cut | Whether the cells it drops cluster together or are scattered through every type |
 | Blank codewords per cell | No cut | A maximum share of a cell's counts | Blanks against real genes per section; whether high-blank cells sit in one area of tissue |
 | Transcripts assigned to a cell | Not checked | A minimum share per section or per FOV | Share per FOV drawn on tissue; a low area points at a segmentation or imaging fault |
-| Cells with no polygon | Kept | Dropped | How many there are (`has_boundary`); whether their calls differ from cells with one |
-| Boundary plane | Every plane kept | Drop cells whose boundary is on the top or bottom plane (`obs["z_plane"]`) | Whether those cells have fewer counts or different calls |
+| Cells with no polygon | Kept | Dropped | How many there are; whether their calls differ from cells with one |
+| Boundary plane | Every plane kept | Drop cells whose boundary is on the top or bottom plane | Whether those cells have fewer counts or different calls |
 | FOV seams and tissue edges | Kept | Drop cells within a set distance of a seam or edge | The QC metrics drawn on tissue; whether seam and edge cells are lower in counts or odd in type |
 | Damaged areas | Kept | Mask regions by hand or by low transcript density | The same tissue maps |
 | Outlier sections | All kept | Flag a section whose metrics sit apart from the rest | The metrics compared across sections, pooled |
@@ -90,36 +90,29 @@ and does removing them change the clusters or the Phase C calls.
 
 **The priority is to reach cell-type annotations (Phase C),** so Phases B and C run on defaults,
 untuned. Where a sweep could improve them, and how to judge it, is noted at the end of each
-phase and left for later. The recipe is the earlier pipeline's, carried over, on scanpy (`sc`).
+phase and left for later.
 
 ### Steps
 
-1. **Load the section's table.** `adata = anndata.read_h5ad(table_path)`, one AnnData that every
-   later step adds to. Keep the raw counts: `adata.layers["counts"] = adata.X.copy()`.
-2. **Filter cells.** `sc.pp.filter_cells(adata, min_counts=20)`. The high cut is off; when on,
-   its threshold is `adata.obs["transcript_count"].quantile(q)`, taken before the low cut, then
-   `sc.pp.filter_cells(adata, max_counts=threshold)`. All 491 genes are kept: no
-   highly-variable selection and no gene filter, since the panel is already curated.
-3. **Normalize.** `sc.pp.normalize_total(adata)` scales every cell to the section's median
-   total, then `sc.pp.log1p(adata)`. Keep the result for markers:
-   `adata.layers["lognorm"] = adata.X.copy()`.
-4. **Scale.** `sc.pp.scale(adata, zero_center=False, max_value=10)`: unit variance, not centred.
-5. **PCA.** `sc.pp.pca(adata, n_comps=30, random_state=0)`.
+1. **Load the section's table,** keeping the raw counts alongside the normalized values.
+2. **Filter cells.** Drop cells under 20 transcripts. The high cut, for doublets and merged
+   cells, is off; if turned on it is a quantile of transcript count, taken before the low cut.
+   All 491 genes are kept: no highly-variable selection and no gene filter, since the panel is
+   already curated.
+3. **Normalize.** Scale every cell to the section's median total, then log. Keep the
+   log-normalized values for markers.
+4. **Scale.** Unit variance, not centred, clipped at 10.
+5. **PCA,** 30 components.
    *Plot: variance explained per component, to show 30 PCs are enough.*
-6. **Neighbour graph.** `sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)`.
-7. **UMAP.** `sc.tl.umap(adata, random_state=0)`.
+6. **Neighbour graph,** 15 neighbours, cosine distance.
+7. **UMAP.**
    *Plot: UMAP coloured by transcript count, to show whether structure tracks depth rather
    than type.*
-8. **Leiden at 0.5, 1.0, 1.5 and 2.0.** For each resolution `r`:
-   `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph",
-   n_iterations=2, random_state=0)`, then renumber its clusters 1..k by size with our own
-   `relabel_by_size()`, so cluster 1 is the largest. Every call and figure names a cluster by
-   that number.
+8. **Leiden at 0.5, 1.0, 1.5 and 2.0.** Each resolution's clusters are renumbered 1..k by size,
+   so cluster 1 is the largest. Every call and figure names a cluster by that number.
    *Plots: UMAP coloured by cluster, one panel per resolution; cells per cluster at each
    resolution; and the clusters drawn on tissue at the resolution annotated, to show whether
    they are spatially coherent.*
-
-   *Checkpoint 1: the clustered object.*
 
 The same recipe, steps 3 to 8, is used again when a single cell type is subclustered in
 Phase C step 9, restarted from its raw counts rather than reusing the section-wide result.
@@ -153,66 +146,48 @@ decided by the same sweeps.
 cohort, which is what makes calls comparable across sections for Phase I.
 
 Every cell is correlated against a reference, and each cluster is then named from the mix of
-its cells' calls alone. The per-cell method is the earlier pipeline's, carried over.
+its cells' calls alone.
 
 ### Steps
 
-0. **Build or load the reference, once for the cohort.** If the reference is already saved,
-   load it. Otherwise build it and save it, so the first section builds it and the rest load it:
-   - *Green, 11 major types:* read the GEO counts in chunks, `pd.read_csv(dge, sep="\t",
-     index_col=0, chunksize=...)`, summing every cell's total over all genes and keeping only
-     the panel genes' rows. Read the per-cell types, `pd.read_csv(attributes, sep="\t",
-     comment="#", header=None)`. Then TP10K = panel counts / cell total x 10,000, mean per type
-     with `groupby(...).mean()`, and `np.log1p`.
-   - *Green, GC1-12:* `pd.read_excel(xlsx, sheet_name="Average")`, the panel genes' rows.
-   - *Shami:* `pd.read_csv` of the table already in the repo.
-   - Map panel genes renamed since the reference was made to the names it uses, with our own
-     `match_panel_genes()`, rather than dropping them.
-
-   Store the chosen reference in `adata.uns["reference"]`.
-1. **Choose the resolution.** `cluster_key = "leiden_1.0"` to start.
-2. **Marker genes per cluster.** `sc.tl.rank_genes_groups(adata, groupby=cluster_key,
-   layer="lognorm", method="wilcoxon")`, read back with `sc.get.rank_genes_groups_df`.
+0. **Build or load the reference, once for the cohort.** The first section builds it and the
+   rest load it. Green's 11 major types are rebuilt from the published counts and labels, as the
+   mean expression per type over the panel genes. Green's GC1-12 are taken as published, and
+   Shami's table is loaded as it stands. Panel genes renamed since a reference was made are
+   mapped to the names it uses rather than dropped. The reference used is recorded with the
+   annotation.
+1. **Choose the resolution,** 1.0 to start.
+2. **Marker genes per cluster,** by a Wilcoxon test on the log-normalized values.
    *Plot: a dot plot of each cluster's top markers.*
-3. **Per-cell correlation.** Over the genes the panel and reference share, matched
-   case-insensitively so mouse `Acta2` finds human `ACTA2`: rank each cell's raw counts,
-   `scipy.stats.rankdata(adata[:, shared].layers["counts"], axis=1)`, rank each reference type
-   the same way, and correlate the ranks, `1 - scipy.spatial.distance.cdist(cell_ranks,
-   type_ranks, metric="correlation")`. That is Spearman correlation, cell by type.
+3. **Per-cell correlation.** Spearman correlation of each cell's raw counts against every
+   reference type, over the genes the panel and reference share. Genes are matched
+   case-insensitively, so mouse `Acta2` finds human `ACTA2`.
    *Plot: the number of genes shared between the panel and the reference.*
-4. **Standardize within each cell.** Subtract each cell's mean correlation and divide by its
-   standard deviation. A cell's correlation to every type rises with the genes it captured; this
-   makes cells comparable with each other without changing any cell's top type. Write
-   `adata.obs[f"corr_{type}"]` for every type.
-5. **Per-cell call.** The type each cell correlates with most, `idxmax(axis=1)`, written to
-   `adata.obs["cell_type"]`.
-6. **Cluster composition.** `pd.crosstab(adata.obs[cluster_key], adata.obs["cell_type"],
-   normalize="index")`: each cluster's share of cells per called type, kept in `adata.uns`.
+4. **Standardize within each cell.** A cell's correlation to every type rises with the genes it
+   captured; standardizing makes cells comparable with each other without changing any cell's
+   top type.
+5. **Per-cell call.** The type each cell correlates with most.
+6. **Cluster composition.** Each cluster's share of cells per called type.
    *Plot: a heatmap of that composition, with the purity threshold marked.*
 7. **Cluster call.** A cluster is named for its top type when that type takes at least 90% of
-   its cells, and Ambiguous otherwise. The call is written to `adata.obs["cluster_type"]` and
-   how it was made to `adata.obs["cluster_call_source"]`: `auto`, `manual` or `unresolved`.
+   its cells, and Ambiguous otherwise. Each call records how it was made: automatically, by
+   hand, or left unresolved.
    *Plot: UMAP coloured by cluster call, with Ambiguous clusters picked out.*
 8. **Resolve Ambiguous clusters by hand.** Each Ambiguous cluster is investigated and given a
    type if the evidence supports one. The evidence is its composition from step 6, its top
-   markers from step 2, and where its cells sit in tissue. A manual call is written to
-   `cluster_type` with source `manual`, and a short note of the evidence is kept per cluster.
-   One rule for what counts as enough evidence applies to every section, so manual calls mean the
-   same thing across the cohort. A cluster that stays unresolved keeps `Ambiguous`, with source
-   `unresolved`, and its cells get `adata.obs["excluded"] = True` with
-   `adata.obs["excluded_at"] = "major"`. Every later phase drops excluded cells. The excluded
-   share per section is reported, and compared across sections in Phase I.
+   markers from step 2, and where its cells sit in tissue. A short note of the evidence is kept
+   per cluster. One rule for what counts as enough evidence applies to every section, so manual
+   calls mean the same thing across the cohort. A cluster that stays unresolved keeps
+   Ambiguous, and its cells are excluded at the major level. Every later phase drops excluded
+   cells. The excluded share per section is reported, and compared across sections in Phase I.
    *Plots: the calls drawn on tissue, to check where each type sits, such as germ cells inside
    tubules and Leydig cells outside them; and a bar chart of cells per call and of how many
    were excluded.*
-
-   *Checkpoint 2: the annotated object.*
-
 9. **Subcluster the types that have a finer reference.** Once the major types are settled, take
-   the cells of one major type and run `cluster_cells` on them again (see Phase B), then
-   annotate the subclusters against that type's finer reference by steps 3 to 8: the same
-   correlation, the same composition rule, and the same by-hand resolution, with the same
-   provenance columns. Which types have a finer reference:
+   the cells of one major type and run the Phase B recipe on them again, then annotate the
+   subclusters against that type's finer reference by steps 3 to 8: the same correlation, the
+   same composition rule, and the same by-hand resolution, recorded the same way. Which types
+   have a finer reference:
 
    | Major type | Fine reference | Status |
    |---|---|---|
@@ -220,12 +195,12 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
    | Sertoli, SPG subtypes | The collaborator's file, if cleared for use | Open question |
    | Leydig, Macrophage, Endothelial, Myoid, InnateLymph, Unknown (Tcf21+) | None yet | Later; other references to find |
 
-   The result is `adata.obs["fine_cell_type"]`, **which is what every later phase reads.** A
-   cell of a type with no fine reference keeps its major label there, with
-   `adata.obs["fine_source"] = "major"`, so cells that were never subclustered can be told apart
-   from those that were. A cell in a subcluster left unresolved by hand is excluded
-   (`excluded_at = "fine"`), separately from a major-level exclusion, so each level's losses can
-   be counted. Adding a reference for another type is filling in one row of this table.
+   The result is each cell's fine cell type, **which is what every later phase reads.** A cell
+   of a type with no fine reference keeps its major label there, marked as never subclustered,
+   so those cells can be told apart from the ones that were. A cell in a subcluster left
+   unresolved by hand is excluded at the fine level, counted separately from a major-level
+   exclusion, so each level's losses can be seen. Adding a reference for another type is filling
+   in one row of this table.
 
    The germ-cell subclusters are a continuum that Leiden cuts at arbitrary points, so the
    fine level may flag more clusters than the major one; its purity threshold is tested on its
@@ -258,7 +233,7 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 | Parameter | Default | Could try | How to judge it |
 |---|---|---|---|
 | Reference | Green's 11 major types | Shami | Agreement between the two annotations, cell by cell and cluster by cluster |
-| Reference level | Green's 11 major types | Green's fine level for every cell at once, rather than by narrowing down | Whether the fine calls agree with the narrowed-down ones |
+| Reference level | Major level, then narrowing down (step 9) | Green's fine level for every cell at once | Whether the fine calls agree with the narrowed-down ones |
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
 | Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or reference markers computed from the reference data | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
@@ -270,15 +245,15 @@ germ cells inside tubules and Leydig cells outside them.
 ## Phases D to I
 
 These are an outline. Phases A to C are decided; D to I are planned in detail once the major-type
-annotation is running. Every one of them reads `fine_cell_type` and drops cells with
-`excluded` set.
+annotation is running. Every one of them reads each cell's fine cell type and drops excluded
+cells.
 
 ## Phase D — Identify tubules
 
 **Scope:** Per section.
 
-Every cell gets a `tubule_id` and a `compartment` (tubule, boundary or interstitium), and every
-tubule a polygon.
+Every cell gets a tubule and a compartment (tubule, boundary or interstitium), and every tubule
+a polygon.
 
 - **From cells:** peritubular myoid cells (Acta2, Myh11) trace each boundary; germ and Sertoli
   cells fill the inside. Connected tubular cells on a spatial graph, closed with a concave hull.
@@ -288,8 +263,8 @@ tubule a polygon.
 - QC per tubule: area, circularity, cell count. Flag tubules cut obliquely, since they distort
   radial position and staging.
 
-Per-cell columns go in the table. Tubule polygons are not per cell, so they are saved beside it
-(GeoParquet, say). Worked out on b2r0 first, like every phase.
+Per-cell results are stored with the cells; tubule polygons are not per cell, so they are
+stored separately.
 
 ## Phase E — Radial layering
 
