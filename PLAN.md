@@ -15,7 +15,8 @@ goes back to b2r0 too, so all 16 are analysed the same way.
 
 ## Phase A1 — Segmentation and data QC
 
-**Scope:** Per section.
+**Scope:** Per section. Could also be pooled: comparing the metrics across sections is what
+would show an outlier section.
 
 Each section gets a QC pass before any thresholds are set, so a bad region is caught here
 rather than in a figure.
@@ -134,7 +135,8 @@ Each cell in a tubule gets a radial position: 0 at the basement membrane, 1 at t
 
 ## Phase D — Stage the tubules
 
-**Scope:** Per section.
+**Scope:** Per section. Could also be pooled: ordering tubules around the cycle may be steadier
+with every section's tubules together than with one section's alone.
 
 Each tubule cross-section sits at one stage of the epithelial cycle (I-XII in mouse), set by
 which germ cells occur together.
