@@ -105,13 +105,19 @@ phase and left for later. The recipe is the earlier pipeline's, carried over, on
    `adata.layers["lognorm"] = adata.X.copy()`.
 4. **Scale.** `sc.pp.scale(adata, zero_center=False, max_value=10)`: unit variance, not centred.
 5. **PCA.** `sc.pp.pca(adata, n_comps=30, random_state=0)`.
+   *Plot: variance explained per component, to show 30 PCs are enough.*
 6. **Neighbour graph.** `sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)`.
 7. **UMAP.** `sc.tl.umap(adata, random_state=0)`.
+   *Plot: UMAP coloured by transcript count, to show whether structure tracks depth rather
+   than type.*
 8. **Leiden at 0.5, 1.0, 1.5 and 2.0.** For each resolution `r`:
    `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph",
    n_iterations=2, random_state=0)`, then renumber its clusters 1..k by size with our own
    `relabel_by_size()`, so cluster 1 is the largest. Every call and figure names a cluster by
    that number.
+   *Plots: UMAP coloured by cluster, one panel per resolution; cells per cluster at each
+   resolution; and the clusters drawn on tissue at the resolution annotated, to show whether
+   they are spatially coherent.*
 
    *Checkpoint 1: the clustered object.*
 
@@ -121,15 +127,6 @@ Phase C step 9, restarted from its raw counts rather than reusing the section-wi
 1.0 may turn out too coarse once annotation narrows down to finer types: germ cells are a
 continuous trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether
 its clusters are fine enough to match the reference's types.
-
-### Plots
-
-1. **PCA variance explained per component,** to show the 30 PCs are enough.
-2. **UMAP coloured by cluster,** one panel per resolution.
-3. **Cluster sizes** per resolution, as a bar chart of cells per cluster.
-4. **UMAP coloured by transcript count,** to show whether clusters track depth rather than type.
-5. **Clusters drawn on tissue,** at the resolution annotated, to show whether they are spatially
-   coherent.
 
 ### Sweeps for later
 
@@ -176,11 +173,13 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
 1. **Choose the resolution.** `cluster_key = "leiden_1.0"` to start.
 2. **Marker genes per cluster.** `sc.tl.rank_genes_groups(adata, groupby=cluster_key,
    layer="lognorm", method="wilcoxon")`, read back with `sc.get.rank_genes_groups_df`.
+   *Plot: a dot plot of each cluster's top markers.*
 3. **Per-cell correlation.** Over the genes the panel and reference share, matched
    case-insensitively so mouse `Acta2` finds human `ACTA2`: rank each cell's raw counts,
    `scipy.stats.rankdata(adata[:, shared].layers["counts"], axis=1)`, rank each reference type
    the same way, and correlate the ranks, `1 - scipy.spatial.distance.cdist(cell_ranks,
    type_ranks, metric="correlation")`. That is Spearman correlation, cell by type.
+   *Plot: the number of genes shared between the panel and the reference.*
 4. **Standardize within each cell.** Subtract each cell's mean correlation and divide by its
    standard deviation. A cell's correlation to every type rises with the genes it captured; this
    makes cells comparable with each other without changing any cell's top type. Write
@@ -189,9 +188,11 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
    `adata.obs["cell_type"]`.
 6. **Cluster composition.** `pd.crosstab(adata.obs[cluster_key], adata.obs["cell_type"],
    normalize="index")`: each cluster's share of cells per called type, kept in `adata.uns`.
+   *Plot: a heatmap of that composition, with the purity threshold marked.*
 7. **Cluster call.** A cluster is named for its top type when that type takes at least 90% of
    its cells, and Ambiguous otherwise. The call is written to `adata.obs["cluster_type"]` and
    how it was made to `adata.obs["cluster_call_source"]`: `auto`, `manual` or `unresolved`.
+   *Plot: UMAP coloured by cluster call, with Ambiguous clusters picked out.*
 8. **Resolve Ambiguous clusters by hand.** Each Ambiguous cluster is investigated and given a
    type if the evidence supports one. The evidence is its composition from step 6, its top
    markers from step 2, and where its cells sit in tissue. A manual call is written to
@@ -201,6 +202,9 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
    `unresolved`, and its cells get `adata.obs["excluded"] = True` with
    `adata.obs["excluded_at"] = "major"`. Every later phase drops excluded cells. The excluded
    share per section is reported, and compared across sections in Phase I.
+   *Plots: the calls drawn on tissue, to check where each type sits, such as germ cells inside
+   tubules and Leydig cells outside them; and a bar chart of cells per call and of how many
+   were excluded.*
 
    *Checkpoint 2: the annotated object.*
 
@@ -227,19 +231,8 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
    fine level may flag more clusters than the major one; its purity threshold is tested on its
    own (see the sweeps below).
 
-### Plots
-
-At the major level, then again at the fine level for each subclustered type:
-
-1. **Genes shared** between the panel and the reference, as a count.
-2. **Cluster composition,** a heatmap of each cluster's share of cells per called type, with the
-   purity threshold marked.
-3. **Marker genes per cluster,** a dot plot of each cluster's top markers.
-4. **UMAP coloured by cluster call,** with Ambiguous clusters picked out.
-5. **Calls drawn on tissue,** for the major types, to check where each type sits: germ cells
-   inside tubules and Leydig cells outside them.
-6. **Cells per call and per exclusion,** a bar chart of cells by type, and of how many were
-   excluded at each level.
+   *Plots: the plots of steps 2 to 8 are drawn again at the fine level, for each subclustered
+   type.*
 
 ### References
 
