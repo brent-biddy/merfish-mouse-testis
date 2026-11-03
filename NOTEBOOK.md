@@ -62,7 +62,19 @@ level but no sample, which is what lets every section share it, and it is writte
 
 Building Green downloads the GSE112393 files, computes each level's centroids over the 491
 panel genes, and deletes the full dataset once the table is saved, so it never stays in the
-notebook's memory. Seven panel genes are missing from the counts under the panel's names, and
+notebook's memory. The files, as checked on 2026-11-03:
+
+| File | Size | Holds | Used for |
+|---|---|---|---|
+| `GSE112393_MergedAdultMouseST25_DGE.txt.gz` | 81 MB | Raw UMI counts, 37,241 genes by 34,633 cells | The 11 major types |
+| `GSE112393_MergedAdultMouseST25_PerCellAttributes.txt.gz` | 1.5 MB | Per cell: dataset, `CellType` as one of the 11 major types, QC metrics | The 11 major types |
+| `GSE112393_MergedAdultMouseST25_12GermCellClusters_AllGeneExp.xlsx` | 11 MB | The authors' centroids for GC1-12 over 24,475 genes | GC1-12, taken as published |
+
+The major types are computed the paper's way: counts divided by the cell's total UMIs over all
+genes, times 10,000, averaged per type, then `ln(mean + 1)`. Recomputed like this they match the
+collaborator's somatic columns exactly, and GC1-12 match its `Germ_1` to `Germ_12`, so the
+collaborator's file and the public data agree wherever both exist. GEO has no per-cell labels
+below the 11 major types, so the SPG and Sertoli subtypes cannot be rebuilt. Seven panel genes are missing from the counts under the panel's names, and
 nine from the germ-cell spreadsheet, being newer symbols for renamed genes (`Prxl2a`, `Plpp3`,
 `Mesd`, `Meioc`, ...); they are mapped to their older names rather than dropped. Shami is
 already a centroid table in the repo, so its section 0 only loads it.

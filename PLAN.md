@@ -1,6 +1,6 @@
 # Analysis plan
 
-Dated 2026-11-02. Each of the collaborator's 16 mouse testis sections is analysed on its own: QC,
+Each of the collaborator's 16 mouse testis sections is analysed on its own: QC,
 clustering and cell-type annotation, then tubules identified, layered and staged. That lets
 cell-type proportions, gene and signalling dynamics, and the interstitium be compared by stage,
 and finally between young and old animals. Phases A to H run per section;
@@ -48,12 +48,9 @@ and does removing them change the clusters or the Phase C calls.
 
 **Scope:** Per section, with one default recipe for every section.
 
-**The priority is to reach cell-type annotations (Phase C).** Phases B and C run on defaults,
-untuned, so the analysis can move on to the tubule phases. Where a sweep could improve them, and
-how to judge it, is noted at the end of each section and left for later.
-
-One default recipe runs on every section, clustered at four resolutions and annotated at 1.0.
-It is the recipe the earlier pipeline used, carried over.
+**The priority is to reach cell-type annotations (Phase C),** so Phases B and C run on defaults,
+untuned. Where a sweep could improve them, and how to judge it, is noted at the end of each
+phase and left for later. The recipe is the earlier pipeline's, carried over:
 
 | Stage | Default |
 |---|---|
@@ -65,15 +62,10 @@ It is the recipe the earlier pipeline used, carried over.
 | PCA | 30 components |
 | Neighbors | Cosine distance, k = 15 |
 | UMAP | On that graph |
-| Leiden | Resolutions 0.5, 1.0, 1.5 and 2.0, all written; 1.0 is the one annotated; random seed 0 throughout |
+| Leiden | Resolutions 0.5, 1.0, 1.5 and 2.0; 1.0 is the one annotated; random seed 0 |
 
-Each resolution leaves two columns. `_v0` is Leiden's own labelling; `_v1` renumbers clusters
-1..k by size, so cluster 1 is the largest. **v1 is what every call and figure names a cluster
-by.** Figures add a display-only `v2`, the cluster's position down the dendrogram, so
-neighbouring numbers are transcriptionally similar; figures read `v1 (v2)`.
-
-Normalizing to each section's own median makes log-normalized values a per-section scale.
-Anything compared across sections starts from counts.
+Clusters are numbered 1..k by size, so cluster 1 is the largest, and every call and figure names
+a cluster by that number.
 
 Four resolutions are written so annotation can move to another without reclustering. 1.0 may
 turn out too coarse once annotation narrows down to finer types: germ cells are a continuous
@@ -88,7 +80,6 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 |---|---|---|---|
 | Low count cut | 20 transcripts | 10 to 50 | Whether any cluster is mostly low-count cells; whether the dropped cells map to one area of tissue or are scattered |
 | High count cut | Off | Top 0.5% or 1% | Whether the cells it removes co-express markers of mutually exclusive types, as doublets and merged cells would |
-| Other cell filters | None | Cell volume, genes per cell | The same checks as the count cuts |
 | Normalization | Section median, then log1p | CP10K; dividing by cell volume | Whether clusters still track cell size or transcript count rather than type |
 | PCs | 30 | 20 to 50 | Variance explained per PC; how much the clusters change |
 | Neighbours | k = 15 | 10 to 50 | How much the clusters change |
@@ -103,101 +94,54 @@ decided by the same sweeps.
 ## Phase C — Cell-type annotation
 
 **Scope:** Per section, with the same reference and the same purity threshold for the whole
-cohort.
+cohort, which is what makes calls comparable across sections for Phase I.
 
 Every cell is correlated against a reference, and each cluster is then named from the mix of
 its cells' calls alone. The per-cell method is the earlier pipeline's, carried over.
 
 0. **Build the reference, once for the cohort.** Before any section is annotated, the reference
-   is built from its source data (below) and saved. Every section after the first reuses the
-   saved copy, so it is built once, not sixteen times.
+   is built from its source data and saved; every later section reuses it.
 1. **Per-cell correlation.** Spearman correlation of each cell's raw counts against every
    reference cell type, over the genes the panel and reference share. Genes match
-   case-insensitively, so mouse `Acta2` finds human `ACTA2`; which panel genes matched is
-   recorded.
+   case-insensitively, so mouse `Acta2` finds human `ACTA2`.
 2. **Standardize within each cell.** A cell's correlation to every type rises with the genes it
    captured, so correlations are z-scored per cell. This cannot change a cell's top type; it
    makes cells comparable with each other.
-3. **Per-cell call.** `cell_type_per_cell` is the type with the highest correlation; every
-   type's value is kept as `corr_<type>`.
+3. **Per-cell call.** Each cell's call is the type it correlates with most; every type's score
+   is kept.
 4. **Cluster composition.** Each cluster's share of cells per called type.
-5. **Cluster call.** A cluster is named when one type takes at least 90% of its cells. Below
-   that it is called Ambiguous, and its evidence is laid out on its own. The earlier report
-   used 70%; 90% asks for a much clearer majority.
+5. **Cluster call.** A cluster is named when one type takes at least 90% of its cells; below
+   that it is called Ambiguous, and its evidence is laid out on its own.
 6. **Cluster markers, alongside.** Each cluster's top marker genes, at the resolution being
    annotated, are shown next to its composition to see whether they are informative. They are
    not used to make or check a call, and no marker list is defined for the reference cell types.
 
-| Reference | Species | Cell types | Values | Fit for this plan |
-|---|---|---|---|---|
-| Green et al. 2018 | Mouse | 11 major types; 32 in the collaborator's copy: 7 somatic, 9 Sertoli subtypes, 4 SPG, 12 germ-cell clusters | ln(mean TP10K + 1); 19 of the collaborator's 32 columns confirmed against GEO | Used first. Resolves the germ-cell stages that layering and staging need |
-| Shami et al. (the centroid table already in the repo) | Human | 11 major types | ln(mean + 1) | The alternative. Too coarse for staging |
+### References
 
-**One reference at a time.** The reference is a setting of the notebook, Green or Shami, and a
-run annotates against that one only. **The first runs use Green's 11 major types.** Comparing
-the annotations the two give is left for later; each reference's annotation is kept, so that
-comparison needs no rerun. Finer types come later, by narrowing down from the major types
-rather than calling every cell against every subtype at once (see *Narrowing down*, below).
+**One reference at a time.** The reference is a setting, Green or Shami, and a run annotates
+against that one only. Comparing the annotations the two give is left for later; each
+reference's annotation is kept, so that comparison needs no rerun.
+
+| Reference | Species | Cell types | Values | Use |
+|---|---|---|---|---|
+| Green et al. 2018, 11 major types | Mouse | InnateLymph, Macrophage, Endothelial, Myoid, Leydig, Sertoli, Unknown (Tcf21+), SPG, Scytes, STids, Elongating | ln(mean TP10K + 1), rebuilt from the published counts and labels | **The first runs.** |
+| Green et al. 2018, germ-cell clusters | Mouse | GC1-GC12 | ln(mean TP10K + 1), as published | Narrowing down germ cells, for staging |
+| Shami et al. | Human | 11 major types | ln(mean + 1) | The alternative |
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
-RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/)):
-34,633 Drop-seq mouse testis cells. Its data is GEO
-[GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), checked on
-2026-11-03:
+RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/));
+data at GEO [GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393). Each
+level is a reference of its own, never mixed into one table.
 
-| File | Size | Holds |
-|---|---|---|
-| `GSE112393_MergedAdultMouseST25_DGE.txt.gz` | 81 MB | Raw UMI counts, 37,241 genes by 34,633 cells |
-| `GSE112393_MergedAdultMouseST25_PerCellAttributes.txt.gz` | 1.5 MB | Per cell: dataset, `CellType` as one of the 11 major types, and QC metrics |
-| `GSE112393_MergedAdultMouseST25_12GermCellClusters_AllGeneExp.xlsx` | 11 MB | The authors' own centroids for germ-cell clusters GC1-12, over 24,475 genes, as average, total and fraction expressing |
+### Narrowing down
 
-The 11 major types are InnateLymph, Macrophage, Endothelial, Myoid, Leydig, Sertoli, Unknown,
-SPG, Scytes, STids and Elongating. The paper normalizes as `ln(TP10K + 1)`: counts divided by
-the cell's total UMIs, times 10,000, then natural log. A centroid is `ln(mean TP10K + 1)`, the
-same convention as Shami's.
-
-**What the collaborator's 32 columns turn out to be:**
-
-| Columns | Source | Status |
-|---|---|---|
-| 7 somatic (InnateLymph, Macrophage, Endothelial, Myoid, Leydig, Sertoli, Tcf21+) | The major types, recomputed from the counts and labels above | Exact match on every panel gene; Tcf21+ is the GEO type called Unknown |
-| `Germ_1` to `Germ_12` | GC1-GC12 in the spreadsheet, rounded to 3 decimals | Exact match |
-| `SPG_1` to `SPG_4`, 9 Sertoli subtypes | Not on GEO: per-cell labels below the 11 major types were not deposited | Unconfirmed; source unknown |
-
-So the scale question is settled for 19 of 32 columns, and they need no recomputing: the
-collaborator's values are the published ones. The 13 subtype columns cannot be rebuilt from
-public data.
-
-**Two Green references are built from it,** once for the whole cohort, each over the 491 panel
-genes:
-
-- **Green, 11 major types,** recomputed from the counts and labels. Coarse, and every column is
-  reproducible from public data. This is the one the first annotation uses.
-- **Green, fine,** GC1-12 as published, for narrowing down germ cells later. Whether the 13
-  unconfirmed SPG and Sertoli subtype columns join it is still to decide.
-
-Each level is a reference of its own, not one table mixing them. The collaborator's 32 columns
-mix levels: a `Sertoli` column beside nine Sertoli subtypes built from the same cells, and SPG
-subtypes beside germ clusters that include spermatogonia. Calling cells against such a table
-splits a Sertoli cell's vote across ten near-identical columns, and no cluster reaches 90%.
-
-**Narrowing down, after the first annotation.** A cluster called as one major type is taken
-on its own, reclustered, and its subclusters annotated against the finer level for that type:
-germ cells against GC1-12, and Sertoli cells or spermatogonia against their subtypes if those
-are used. The same composition rule applies to the subclusters. This runs after the major-type
-annotation, adds its subclusters and calls to the same object, and is planned in detail once the major-type
-annotation is done. The major types already give the germ-cell order Phase E checks (SPG,
-spermatocytes, round spermatids, elongating); staging (Phase F) is what needs the finer level.
-
-A possible extra, not planned yet: reference marker genes computed from the reference data
-itself, rather than a list written by hand. How depends on what the reference comes as. With
-per-cell counts and labels, markers come from a differential expression test between types;
-with centroids alone, from how specific each gene is to one type relative to the rest. Either
-way they are limited to the 491 panel genes, and could be set beside each cluster's own
-markers to see whether the two agree.
-
-Calls must mean the same thing in every section for Phase I. The same reference and the same
-90% threshold in every section are what make them comparable.
+After the first annotation, the cells called as one major type are taken on their own,
+reclustered, and the subclusters annotated against that type's finer level, with the same
+composition rule: germ cells against GC1-12, and Sertoli cells or spermatogonia against their
+subtypes if those are used. The subclusters and their calls are added to the same object. It is
+planned in detail once the major-type annotation is done. The major types already give the
+germ-cell order Phase E checks (SPG, spermatocytes, round spermatids, elongating); staging
+(Phase F) is what needs the finer level.
 
 ### Sweeps for later
 
@@ -208,15 +152,17 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 | Reference | Green's 11 major types | Shami | Agreement between the two annotations, cell by cell and cluster by cluster |
 | Reference level | Green's 11 major types | Green's fine level for every cell at once, rather than by narrowing down | Whether the fine calls agree with the narrowed-down ones |
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
-| Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or the computed reference markers | Agreement with the all-gene calls |
+| Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or reference markers computed from the reference data | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
 | Purity threshold | 90% | 70% to 95% | How many clusters become Ambiguous, and whether their own markers set them apart |
 
-Normalization needs no sweep here: scaling or log-transforming a cell's counts keeps their
-ranks, so Spearman gives the same answer on any of them.
-
 Whatever the setting, a call can be sanity-checked by where the type sits in tissue, such as
 germ cells inside tubules and Leydig cells outside them.
+
+## Phases D to I
+
+These are an outline. Phases A to C are decided; D to I are planned in detail once the major-type
+annotation is running.
 
 ## Phase D — Identify tubules
 
@@ -259,7 +205,6 @@ which germ cells occur together.
 - **Unsupervised:** a composition or pseudobulk profile per tubule, ordered around the cycle;
   tubule profiles often form a ring.
 - Realistic target: stage groups (I-III, IV-VI, VII-VIII, IX-XII) rather than all twelve.
-- Ask the collaborator whether these sections have been staged before; that is a ready validation set.
 
 ## Phase G — Within the tubule, by stage
 
@@ -267,9 +212,7 @@ which germ cells occur together.
 
 - Cell-type proportions by stage
 - Gene expression across the cycle per cell type, as pseudobulk per tubule ordered by stage
-- Sertoli-germ cell signalling by stage, from ligand-receptor pairs
-
-Only pairs on the 491-gene panel can be tested; listing which ones are is a cheap early step.
+- Sertoli-germ cell signalling by stage, from ligand-receptor pairs on the 491-gene panel
 
 ## Phase H — Extratubular cells and the tubule
 
@@ -293,12 +236,14 @@ Only pairs on the 491-gene panel can be tested; listing which ones are is a chea
 
 The unit of replication is the **animal**, not the section or the tubule: pseudobulk per animal,
 or mixed models with animal as a random effect. Sections from one animal are not independent.
+Normalizing to each section's own median makes log-normalized values a per-section scale, so
+anything compared across sections starts from counts.
 
 ## Decisions and open questions
 
 - [ ] Which sections are young and which old, and how many animals in each? (Do the a1, b2, c1,
       d2, 2a, 2b prefixes mark animals?)
-- [ ] Green reference: whether the unconfirmed SPG and Sertoli subtype columns are used, and if so where they came from
+- [ ] Green SPG and Sertoli subtypes: the collaborator's file has them, but they are not in the public data. Use them, and if so, where did they come from?
 - [ ] Which image channels exist for tubule segmentation?
-- [ ] Has the collaborator staged any of these sections?
+- [ ] Has the collaborator staged any of these sections? That would be a ready validation set for Phase F.
 - [ ] Which ligand-receptor pairs the panel covers
