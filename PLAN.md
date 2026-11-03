@@ -215,35 +215,53 @@ the per-cell calls, on defaults.
 
 | Reference | Species | Cell types | Values | Fit for this plan |
 |---|---|---|---|---|
-| Green et al. 2018 | Mouse | 32 in the collaborator's copy: 7 somatic, 9 Sertoli subtypes, 16 germ-cell types | The collaborator's copy (`green_mouse_testis_centroids.csv.gz`) is unconfirmed; to be recomputed as ln(mean + 1) | Used first. Resolves the germ-cell stages that layering and staging need |
+| Green et al. 2018 | Mouse | 11 major types; 32 in the collaborator's copy: 7 somatic, 9 Sertoli subtypes, 4 SPG, 12 germ-cell clusters | ln(mean TP10K + 1); 19 of the collaborator's 32 columns confirmed against GEO | Used first. Resolves the germ-cell stages that layering and staging need |
 | Shami et al. (`shami_human_testis_centroids.csv.gz`) | Human | 11 major types | ln(mean + 1) | Run alongside. Too coarse for staging; useful as a cross-check |
 
-**Both references are used, Green first.** The Green centroids in the repo came from the
-collaborator, and how their values were computed is unknown, so they are not used as they
-stand. Instead the Green et al. 2018 data is tracked down and the centroids recomputed from it,
-the same way as Shami's (`ln(mean + 1)` per cell type), so the two references are built alike.
-Shami is run alongside as a cross-check.
+**Both references are used, Green first.** Shami is run alongside as a cross-check.
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
 RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/)):
-about 35,000 Drop-seq mouse testis cells. Its data is GEO
-[GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), which lists three
-processed files (from a search of the record; not yet opened):
+34,633 Drop-seq mouse testis cells. Its data is GEO
+[GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), checked on
+2026-11-03:
 
-| File | Size | Likely holds |
+| File | Size | Holds |
 |---|---|---|
-| `GSE112393_MergedAdultMouseST25_DGE.txt.gz` | 77.5 MB | The digital expression matrix: counts, genes by cells |
-| `GSE112393_MergedAdultMouseST25_PerCellAttributes.txt.gz` | 1.4 MB | Per-cell attributes, most likely including each cell's cluster |
-| `GSE112393_MergedAdultMouseST25_12GermCellClusters_AllGeneExp.xlsx` | 10.8 MB | Expression of every gene in the 12 germ-cell clusters |
+| `GSE112393_MergedAdultMouseST25_DGE.txt.gz` | 81 MB | Raw UMI counts, 37,241 genes by 34,633 cells |
+| `GSE112393_MergedAdultMouseST25_PerCellAttributes.txt.gz` | 1.5 MB | Per cell: dataset, `CellType` as one of the 11 major types, and QC metrics |
+| `GSE112393_MergedAdultMouseST25_12GermCellClusters_AllGeneExp.xlsx` | 11 MB | The authors' own centroids for germ-cell clusters GC1-12, over 24,475 genes, as average, total and fraction expressing |
 
-If the attributes file carries the cluster labels, the counts and labels together are all the
-recomputed centroids need, and also all a differential test for reference markers needs.
+The 11 major types are InnateLymph, Macrophage, Endothelial, Myoid, Leydig, Sertoli, Unknown,
+SPG, Scytes, STids and Elongating. The paper normalizes as `ln(TP10K + 1)`: counts divided by
+the cell's total UMIs, times 10,000, then natural log. A centroid is `ln(mean TP10K + 1)`, the
+same convention as Shami's.
+
+**What the collaborator's 32 columns turn out to be:**
+
+| Columns | Source | Status |
+|---|---|---|
+| 7 somatic (InnateLymph, Macrophage, Endothelial, Myoid, Leydig, Sertoli, Tcf21+) | The major types, recomputed from the counts and labels above | Exact match on every panel gene; Tcf21+ is the GEO type called Unknown |
+| `Germ_1` to `Germ_12` | GC1-GC12 in the spreadsheet, rounded to 3 decimals | Exact match |
+| `SPG_1` to `SPG_4`, 9 Sertoli subtypes | Not on GEO: per-cell labels below the 11 major types were not deposited | Unconfirmed; source unknown |
+
+So the scale question is settled for 19 of 32 columns, and they need no recomputing: the
+collaborator's values are the published ones. The 13 subtype columns cannot be rebuilt from
+public data.
 
 **The reference is built once, outside the per-section notebook.** A separate notebook downloads
-these files, computes `ln(mean + 1)` per cell type over the 491 panel genes, and writes a centroid
-table to `assets/reference/`, the same shape as Shami's. Every per-section notebook then loads
-that small table rather than the full dataset. Computed reference markers, if wanted, are written
-beside it by the same notebook.
+these files and writes centroid tables to `assets/reference/`, the same shape as Shami's, over
+the 491 panel genes. Every per-section notebook then loads those small tables rather than the
+full dataset. Two levels come out of it:
+
+- **Green, 11 major types,** recomputed from the counts and labels. Coarse, and every column is
+  reproducible from public data.
+- **Green, fine,** the 7 somatic types and GC1-12 as published. Whether the 13 unconfirmed SPG
+  and Sertoli subtype columns join it is still to decide.
+
+Seven panel genes are missing from the counts under the panel's names, and nine from the
+spreadsheet, being newer symbols for renamed genes (`Prxl2a`, `Plpp3`, `Mesd`, `Meioc`, ...).
+The reference notebook maps them to their older names rather than dropping them.
 
 A possible extra, not planned yet: reference marker genes computed from the reference data
 itself, rather than a list written by hand. How depends on what the reference comes as. With
@@ -355,7 +373,7 @@ or mixed models with animal as a random effect. Sections from one animal are not
 
 - [ ] Which sections are young and which old, and how many animals in each? (Do the a1, b2, c1,
       d2, 2a, 2b prefixes mark animals?)
-- [ ] Green reference: open the GSE112393 files, confirm the attributes file holds each cell's cluster, and build the centroids in their own notebook
+- [ ] Green reference: whether the unconfirmed SPG and Sertoli subtype columns are used, and if so where they came from
 - [ ] Which image channels exist for tubule segmentation?
 - [ ] Where tubule polygons are stored, given the store is write-once
 - [ ] Has the collaborator staged any of these sections?
