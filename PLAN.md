@@ -12,9 +12,15 @@ once every section is through F. Anything learned on the later sections that cha
 goes back to b2r0 too, so all 16 are analysed the same way.
 
 The per-section analysis is one Quarto notebook rather than the `bin/` scripts, built up a
-section at a time in phase order, with each section's result cached so editing a later one
-does not recompute the earlier ones. It starts from the store and table steps 1a and 1b
-already wrote; the steps after those are a reference for the recipe, not what runs.
+section at a time in phase order. It starts from the store and table steps 1a and 1b already
+wrote; the steps after those are a reference for the recipe, not what runs.
+
+Each section caches its result as an on-disk checkpoint: a file (`.h5ad`, `.parquet`) named
+by a key built from that section's parameters and the key of the section before it. A section
+whose file exists loads it instead of recomputing, so editing a later section never reruns an
+earlier one, and changing a parameter reruns only that section and the ones after it. A code
+change the parameters do not capture needs the checkpoint deleted, or the section's code
+hashed into its key. The checkpoints are ordinary files, readable outside the notebook.
 
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
@@ -194,4 +200,3 @@ or mixed models with animal as a random effect. Sections from one animal are not
 - [ ] Where tubule polygons are stored, given the store is write-once
 - [ ] Has the collaborator staged any of these sections?
 - [ ] Which ligand-receptor pairs the panel covers
-- [ ] Notebook caching: on-disk checkpoints per section, Quarto's own cache, or both
