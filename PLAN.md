@@ -214,6 +214,13 @@ about 35,000 Drop-seq mouse testis cells. Its data is listed as GEO
 [GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), still to be
 checked for the counts and the cell-type labels the centroids need.
 
+A possible extra, not planned yet: reference marker genes computed from the reference data
+itself, rather than a list written by hand. How depends on what the reference comes as. With
+per-cell counts and labels, markers come from a differential expression test between types;
+with centroids alone, from how specific each gene is to one type relative to the rest. Either
+way they are limited to the 491 panel genes, and could be set beside each cluster's own
+markers to see whether the two agree.
+
 Calls must mean the same thing in every section for Phase I. The same references and the same
 90% threshold in every section are what make them comparable.
 
@@ -225,7 +232,7 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 |---|---|---|---|
 | Reference | Green and Shami, both run | Green's 32 types grouped to coarser levels | Agreement on the coarse types both have, once Green's types are grouped to Shami's 11 |
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
-| Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types | Agreement with the all-gene calls |
+| Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or the computed reference markers | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
 | Purity threshold | 90% | 70% to 95% | How many clusters become Ambiguous, and whether their own markers set them apart |
 
