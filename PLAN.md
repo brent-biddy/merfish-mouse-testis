@@ -7,38 +7,6 @@ and finally between young and old animals.
 
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
-## At a glance
-
-```mermaid
-flowchart LR
-    A1[A1 QC] --> A2[A2 Filter and cluster] --> A3[A3 Annotate]
-    A3 --> B[B Identify tubules]
-    B --> C[C Radial layering]
-    C --> D[D Stage tubules]
-    D --> E[E Within tubule, by stage]
-    D --> F[F Interstitium and tubules]
-    E --> G[G Young vs old]
-    F --> G
-```
-
-Phases A to F run per section. Layering (C) doubles as a check on A3 and B: if germ cells do
-not come out in the expected order, the annotation or the tubule boundaries are wrong. Only G
-pools sections.
-
-## Where it stands
-
-13 of 16 sections are clustered; none are annotated yet. Status is from `NOTES.md` of
-2026-10-30, when the c1r1 and a1r0 jobs were still pending on OSCER.
-
-| Sections | Segmentation | Steps 1a-1b (store + table) | Step 2 (clustering) | Step 3 (annotation) |
-|---|---|---|---|---|
-| 2ar0, 2ar1, 2br0, 2br1, a1r1, b2r0, b2r1, b2r2, c1r0, c1r2, d2r0, d2r1, d2r2 | 3D cellpose | Done | Done | Not run |
-| c1r1 | 3D cellpose, cropped raster (offset -270, -293) | 1a done, 1b queued | Queued after 1b | Not run |
-| a1r0-upper, a1r0-lower | 3D cellpose, one raster for both sections (offset -245, -290) | Split queued | Not started | Not run |
-
-b2r0 is the pilot: the analysis is settled on it first, then the finished notebook is rendered
-across all 16 with `render_sample`.
-
 ## Phase A1 — Segmentation and data QC
 
 Each section gets a QC pass before any thresholds are set, so a bad region is caught here
