@@ -3,12 +3,12 @@
 Dated 2026-11-02. Each of the collaborator's 16 mouse testis sections is analysed on its own: QC,
 clustering and cell-type annotation, then tubules identified, layered and staged. That lets
 cell-type proportions, gene and signalling dynamics, and the interstitium be compared by stage,
-and finally between young and old animals. Phases A to F run per section;
-only G pools sections.
+and finally between young and old animals. Phases A to H run per section;
+only I pools sections.
 
 The analysis is worked out end to end on one section, b2r0, before it touches the others:
-phases A to F are settled there first, then run on the remaining 15 sections, and G follows
-once every section is through F. Anything learned on the later sections that changes a step
+phases A to H are settled there first, then run on the remaining 15 sections, and I follows
+once every section is through H. Anything learned on the later sections that changes a step
 goes back to b2r0 too, so all 16 are analysed the same way.
 
 The per-section analysis is one Quarto notebook rather than the `bin/` scripts, built up a
@@ -37,13 +37,13 @@ each other.
 
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
-## Phase A1 — Segmentation and data QC
+## Phase A — Segmentation and data QC
 
 **Scope:** Per section.
 
 **Deferred.** The segmentations already run are accepted as they are, and the analysis moves on.
 The report's existing QC section stays as a first look. Nothing is filtered on QC yet beyond
-A2's low count cut.
+Phase B's low count cut.
 
 ### Sweeps for later
 
@@ -53,7 +53,7 @@ applies to the segmentation as it stands; none means re-segmenting.
 | QC check | Default | Could try | How to judge it |
 |---|---|---|---|
 | Cell volume | No cut | Drop the smallest and largest cells, by fixed volumes or quantiles | Whether small cells are fragments (few genes, no clear type) and large ones merges (markers of mutually exclusive types) |
-| Genes per cell | No cut | A minimum, alongside A2's count cut | Whether the cells it drops cluster together or are scattered through every type |
+| Genes per cell | No cut | A minimum, alongside Phase B's count cut | Whether the cells it drops cluster together or are scattered through every type |
 | Blank codewords per cell | No cut | A maximum share of a cell's counts | Blanks against real genes per section; whether high-blank cells sit in one area of tissue |
 | Transcripts assigned to a cell | Not checked | A minimum share per section or per FOV | Share per FOV drawn on tissue; a low area points at a segmentation or imaging fault |
 | Cells with no polygon | Kept | Dropped | How many there are (`has_boundary`); whether their calls differ from cells with one |
@@ -63,15 +63,15 @@ applies to the segmentation as it stands; none means re-segmenting.
 | Outlier sections | All kept | Flag a section whose metrics sit apart from the rest | The metrics compared across sections, pooled |
 
 Every row is judged by the same two questions: are the cells it removes worse than the rest,
-and does removing them change the clusters or the A3 calls.
+and does removing them change the clusters or the Phase C calls.
 
-## Phase A2 — Filtering and clustering
+## Phase B — Filtering and clustering
 
 **Scope:** Per section, with one default recipe for every section.
 
-**The priority is to reach cell-type annotations (A3).** A2 and A3 run on defaults, untuned,
-so the analysis can move on to the tubule phases. Where a sweep could improve them, and how to
-judge it, is noted at the end of each section and left for later.
+**The priority is to reach cell-type annotations (Phase C).** Phases B and C run on defaults,
+untuned, so the analysis can move on to the tubule phases. Where a sweep could improve them, and
+how to judge it, is noted at the end of each section and left for later.
 
 The notebook starts from the recipe step 2 (`bin/cluster_spatialdata_gpu.py`) uses, as a
 default for every section, read at resolution 1.0.
@@ -116,15 +116,15 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 | Normalization | Section median, then log1p | CP10K; dividing by cell volume | Whether clusters still track cell size or transcript count rather than type |
 | PCs | 30 | 20 to 50 | Variance explained per PC; how much the clusters change |
 | Neighbours | k = 15 | 10 to 50 | How much the clusters change |
-| Resolution | 1.0 | 0.1 to 2.0, already written | Agreement between neighbouring resolutions (adjusted Rand index); whether a split gives clusters with distinct markers; how pure each cluster's A3 calls are |
+| Resolution | 1.0 | 0.1 to 2.0, already written | Agreement between neighbouring resolutions (adjusted Rand index); whether a split gives clusters with distinct markers; how pure each cluster's Phase C calls are |
 | Seed | 0 | Several | Agreement across seeds at the chosen resolution |
 
-Two checks apply to most rows: how stable the clusters are, and how cleanly A3 can name them.
+Two checks apply to most rows: how stable the clusters are, and how cleanly Phase C can name them.
 A cluster that only appears at one setting, or that no reference type takes, is the thing to
 look for. Whether thresholds and resolution end up fixed for the cohort or set per section is
 decided by the same sweeps.
 
-## Phase A3 — Cell-type annotation
+## Phase C — Cell-type annotation
 
 **Scope:** Per section, against one reference and one rulebook fixed for the whole cohort.
 
@@ -155,7 +155,7 @@ on defaults, which makes no cluster-level call itself.
 its values were computed. Their own script uses Pearson on log2 counts per 1,000; ours is
 Spearman, which uses only ranks, so the scale matters less but still needs confirming.
 
-Calls must mean the same thing in every section for Phase G. One fixed reference does most of
+Calls must mean the same thing in every section for Phase I. One fixed reference does most of
 that; the hand-made cluster calls follow one written rulebook (marker genes per type, the 70%
 threshold).
 
@@ -178,7 +178,7 @@ Whatever the setting, a call is checked the same two ways: canonical markers sho
 expressed in the cells called that type, and the type should sit where it belongs in tissue,
 such as germ cells inside tubules and Leydig cells outside them.
 
-## Phase B — Identify tubules
+## Phase D — Identify tubules
 
 **Scope:** Per section.
 
@@ -198,7 +198,7 @@ goes beside the table (GeoParquet, say) or needs an exception. Per-cell columns 
 
 Prototype in a notebook on b2r0; promote to a pipeline step once the method settles.
 
-## Phase C — Radial layering
+## Phase E — Radial layering
 
 **Scope:** Per section.
 
@@ -206,10 +206,10 @@ Each cell in a tubule gets a radial position: 0 at the basement membrane, 1 at t
 
 - Expected order, outside in: spermatogonia and Sertoli nuclei, spermatocytes, round
   spermatids, elongating spermatids.
-- Checks Phases A3 and B together; a wrong order points at one of them.
+- Checks Phases C and D together; a wrong order points at one of them.
 - Gene expression along the radial axis, within each cell type.
 
-## Phase D — Stage the tubules
+## Phase F — Stage the tubules
 
 **Scope:** Per section. Could also be pooled: ordering tubules around the cycle may be steadier
 with every section's tubules together than with one section's alone.
@@ -223,7 +223,7 @@ which germ cells occur together.
 - Realistic target: stage groups (I-III, IV-VI, VII-VIII, IX-XII) rather than all twelve.
 - Ask the collaborator whether these sections have been staged before; that is a ready validation set.
 
-## Phase E — Within the tubule, by stage
+## Phase G — Within the tubule, by stage
 
 **Scope:** Per section.
 
@@ -233,7 +233,7 @@ which germ cells occur together.
 
 Only pairs on the 491-gene panel can be tested; listing which ones are is a cheap early step.
 
-## Phase F — Extratubular cells and the tubule
+## Phase H — Extratubular cells and the tubule
 
 **Scope:** Per section.
 
@@ -243,7 +243,7 @@ Only pairs on the 491-gene panel can be tested; listing which ones are is a chea
 - Whether the interstitium beside a tubule changes with that tubule's stage
 - Ligand-receptor signalling across the basement membrane
 
-## Phase G — Young vs old
+## Phase I — Young vs old
 
 **Scope:** Over the cohort, sections grouped by animal and animals by age.
 
