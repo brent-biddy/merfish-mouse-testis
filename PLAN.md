@@ -106,6 +106,15 @@ phase and left for later. The recipe is the earlier pipeline's, carried over, on
 
    *Checkpoint 1: the clustered object.*
 
+Steps 3 to 8 are one function, `cluster_cells(adata)`, and the same function reclusters a
+single cell type's cells in Phase C step 9. Nothing is reused between levels: the subset starts
+again from its raw counts layer and runs the same normalize, scale, PCA, neighbours, UMAP and
+Leiden calls with the same parameters. Only the filter (step 2) is skipped, since those cells
+already passed it. Normalization then means the subset's own median total, so log-normalized
+values are on a different scale at each level; anything compared across levels starts from
+counts. A subset too small for 30 PCs or k = 15 raises an error rather than quietly changing
+the recipe.
+
 Four resolutions are written so annotation can move to another without reclustering. 1.0 may
 turn out too coarse once annotation narrows down to finer types: germ cells are a continuous
 trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether its
@@ -170,19 +179,42 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
 6. **Cluster composition.** `pd.crosstab(adata.obs[cluster_key], adata.obs["cell_type"],
    normalize="index")`: each cluster's share of cells per called type, kept in `adata.uns`.
 7. **Cluster call.** A cluster is named for its top type when that type takes at least 90% of
-   its cells, and Ambiguous otherwise, written to `adata.obs["cluster_type"]`. Each Ambiguous
-   cluster's evidence is laid out on its own.
-8. **Markers alongside.** Each cluster's top markers from step 2 are shown next to its
-   composition, to see whether they are informative. They are not used to make or check a call,
-   and no marker list is defined for the reference cell types.
+   its cells, and Ambiguous otherwise. The call is written to `adata.obs["cluster_type"]` and
+   how it was made to `adata.obs["cluster_call_source"]`: `auto`, `manual` or `unresolved`.
+8. **Resolve Ambiguous clusters by hand.** Each Ambiguous cluster is investigated and given a
+   type if the evidence supports one. The evidence is its composition from step 6, its top
+   markers from step 2, and where its cells sit in tissue. A manual call is written to
+   `cluster_type` with source `manual`, and a short note of the evidence is kept per cluster.
+   One rule for what counts as enough evidence applies to every section, so manual calls mean the
+   same thing across the cohort. A cluster that stays unresolved keeps `Ambiguous`, with source
+   `unresolved`, and its cells get `adata.obs["excluded"] = True` with
+   `adata.obs["excluded_at"] = "major"`. Every later phase drops excluded cells. The excluded
+   share per section is reported, and compared across sections in Phase I.
 
    *Checkpoint 2: the annotated object.*
 
-9. **Narrow down, later.** Once the major types are called, take the cells of one type, recluster
-   them, and annotate the subclusters against that type's finer level by the same composition
-   rule: germ cells against GC1-12, and Sertoli cells or spermatogonia against their subtypes if
-   those are used. The major types already give the germ-cell order Phase E checks; staging
-   (Phase F) is what needs the finer level. Planned in detail once C1 to C8 run.
+9. **Subcluster the types that have a finer reference.** Once the major types are settled, take
+   the cells of one major type and run `cluster_cells` on them again (see Phase B), then
+   annotate the subclusters against that type's finer reference by steps 3 to 8: the same
+   correlation, the same composition rule, and the same by-hand resolution, with the same
+   provenance columns. Which types have a finer reference:
+
+   | Major type | Fine reference | Status |
+   |---|---|---|
+   | Germ cells (SPG, Scytes, STids, Elongating) | Green GC1-12 | **Now** |
+   | Sertoli, SPG subtypes | The collaborator's file, if cleared for use | Open question |
+   | Leydig, Macrophage, Endothelial, Myoid, InnateLymph, Unknown (Tcf21+) | None yet | Later; other references to find |
+
+   The result is `adata.obs["fine_cell_type"]`, **which is what every later phase reads.** A
+   cell of a type with no fine reference keeps its major label there, with
+   `adata.obs["fine_source"] = "major"`, so cells that were never subclustered can be told apart
+   from those that were. A cell in a subcluster left unresolved by hand is excluded
+   (`excluded_at = "fine"`), separately from a major-level exclusion, so each level's losses can
+   be counted. Adding a reference for another type is filling in one row of this table.
+
+   The germ-cell subclusters are a continuum that Leiden cuts at arbitrary points, so the
+   fine level may flag more clusters than the major one; its purity threshold is tested on its
+   own (see the sweeps below).
 
 ### References
 
@@ -212,7 +244,7 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
 | Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or reference markers computed from the reference data | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
-| Purity threshold | 90% | 70% to 95% | How many clusters become Ambiguous, and whether their own markers set them apart |
+| Purity threshold, major and fine level | 90% | 70% to 95%, each level on its own | How many clusters become Ambiguous; the share of all cells, and of germ cells, left excluded once hand resolution is done; whether an Ambiguous cluster's own markers set it apart |
 
 Whatever the setting, a call can be sanity-checked by where the type sits in tissue, such as
 germ cells inside tubules and Leydig cells outside them.
@@ -220,7 +252,8 @@ germ cells inside tubules and Leydig cells outside them.
 ## Phases D to I
 
 These are an outline. Phases A to C are decided; D to I are planned in detail once the major-type
-annotation is running.
+annotation is running. Every one of them reads `fine_cell_type` and drops cells with
+`excluded` set.
 
 ## Phase D — Identify tubules
 
@@ -262,6 +295,8 @@ which germ cells occur together.
 - **Rule-based:** germ-cell associations and stage markers (e.g. Stra8 in stages VII-VIII).
 - **Unsupervised:** a composition or pseudobulk profile per tubule, ordered around the cycle;
   tubule profiles often form a ring.
+- GC1-12 are germ-cell differentiation states, not cycle stages. Staging uses them as input, as
+  the germ-cell composition of each tubule, and does not read a stage from them directly.
 - Realistic target: stage groups (I-III, IV-VI, VII-VIII, IX-XII) rather than all twelve.
 
 ## Phase G — Within the tubule, by stage
