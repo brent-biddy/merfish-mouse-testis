@@ -103,16 +103,17 @@ phase and left for later.
    log-normalized values for markers.
 4. **Scale.** Unit variance, not centred, clipped at 10.
 5. **PCA,** 30 components.
-   *Plot: variance explained per component, to show 30 PCs are enough.*
+   - Plot: variance explained per component, to show 30 PCs are enough.
 6. **Neighbour graph,** 15 neighbours, cosine distance.
 7. **UMAP.**
-   *Plot: UMAP coloured by transcript count, to show whether structure tracks depth rather
-   than type.*
+   - Plot: UMAP coloured by transcript count, to show whether structure tracks depth rather
+     than type.
 8. **Leiden at 0.5, 1.0, 1.5 and 2.0.** Each resolution's clusters are renumbered 1..k by size,
    so cluster 1 is the largest. Every call and figure names a cluster by that number.
-   *Plots: UMAP coloured by cluster, one panel per resolution; cells per cluster at each
-   resolution; and the clusters drawn on tissue at the resolution annotated, to show whether
-   they are spatially coherent.*
+   - Plot: UMAP coloured by cluster, one panel per resolution.
+   - Plot: cells per cluster at each resolution.
+   - Plot: the clusters drawn on tissue at the resolution annotated, to show whether they are
+     spatially coherent.
 
 The same recipe, steps 3 to 8, is used again when a single cell type is subclustered in
 Phase C step 9, restarted from its raw counts rather than reusing the section-wide result.
@@ -158,21 +159,21 @@ its cells' calls alone.
    annotation.
 1. **Choose the resolution,** 1.0 to start.
 2. **Marker genes per cluster,** by a Wilcoxon test on the log-normalized values.
-   *Plot: a dot plot of each cluster's top markers.*
+   - Plot: a dot plot of each cluster's top markers.
 3. **Per-cell correlation.** Spearman correlation of each cell's raw counts against every
    reference type, over the genes the panel and reference share. Genes are matched
    case-insensitively, so mouse `Acta2` finds human `ACTA2`.
-   *Plot: the number of genes shared between the panel and the reference.*
+   - Plot: the number of genes shared between the panel and the reference.
 4. **Standardize within each cell.** A cell's correlation to every type rises with the genes it
    captured; standardizing makes cells comparable with each other without changing any cell's
    top type.
 5. **Per-cell call.** The type each cell correlates with most.
 6. **Cluster composition.** Each cluster's share of cells per called type.
-   *Plot: a heatmap of that composition, with the purity threshold marked.*
+   - Plot: a heatmap of that composition, with the purity threshold marked.
 7. **Cluster call.** A cluster is named for its top type when that type takes at least 90% of
    its cells, and Ambiguous otherwise. Each call records how it was made: automatically, by
    hand, or left unresolved.
-   *Plot: UMAP coloured by cluster call, with Ambiguous clusters picked out.*
+   - Plot: UMAP coloured by cluster call, with Ambiguous clusters picked out.
 8. **Resolve Ambiguous clusters by hand.** Each Ambiguous cluster is investigated and given a
    type if the evidence supports one. The evidence is its composition from step 6, its top
    markers from step 2, and where its cells sit in tissue. A short note of the evidence is kept
@@ -180,9 +181,9 @@ its cells' calls alone.
    calls mean the same thing across the cohort. A cluster that stays unresolved keeps
    Ambiguous, and its cells are excluded at the major level. Every later phase drops excluded
    cells. The excluded share per section is reported, and compared across sections in Phase I.
-   *Plots: the calls drawn on tissue, to check where each type sits, such as germ cells inside
-   tubules and Leydig cells outside them; and a bar chart of cells per call and of how many
-   were excluded.*
+   - Plot: the calls drawn on tissue, to check where each type sits, such as germ cells inside
+     tubules and Leydig cells outside them.
+   - Plot: a bar chart of cells per call and of how many were excluded.
 9. **Subcluster the types that have a finer reference.** Once the major types are settled, take
    the cells of one major type and run the Phase B recipe on them again, then annotate the
    subclusters against that type's finer reference by steps 3 to 8: the same correlation, the
@@ -206,8 +207,8 @@ its cells' calls alone.
    fine level may flag more clusters than the major one; its purity threshold is tested on its
    own (see the sweeps below).
 
-   *Plots: the plots of steps 2 to 8 are drawn again at the fine level, for each subclustered
-   type.*
+   - Plots: the plots of steps 2 to 8 are drawn again at the fine level, for each subclustered
+     type.
 
 ### References
 
