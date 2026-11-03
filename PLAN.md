@@ -22,6 +22,19 @@ earlier one, and changing a parameter reruns only that section and the ones afte
 change the parameters do not capture needs the checkpoint deleted, or the section's code
 hashed into its key. The checkpoints are ordinary files, readable outside the notebook.
 
+The checkpoints are the notebook's intermediate results, written into `results/` like the
+pipeline's and gitignored with it:
+
+```
+results/<notebook>/<sample>/<section>/<sample>.<section>.<key>.<ext>
+```
+
+The layout is the pipeline's `results/<run_id>/<sample>/<step>/` with the notebook's name in
+place of the run id. A timestamped run id would start every render in an empty directory and
+find nothing to load; a fixed one lets each render reuse what the last one wrote. The key in
+the filename keeps results from different parameters side by side rather than overwriting
+each other.
+
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
 ## Phase A1 — Segmentation and data QC
