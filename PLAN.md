@@ -51,7 +51,7 @@ The notebook's first sections, in order, with the two checkpoints marked:
 
 6. Choose the resolution to annotate, 1.0 to start
 7. Marker genes per cluster, at that resolution
-8. Per-cell correlation against each reference
+8. Per-cell correlation against the chosen reference
 9. Cluster composition of the per-cell calls
 10. Cluster calls
 
@@ -63,8 +63,9 @@ The notebook's first sections, in order, with the two checkpoints marked:
 The split lets clustering and annotation be iterated on separately. Changing the resolution,
 the markers, the correlation or the calls reruns only sections 6 to 10 from checkpoint 1;
 changing the clustering reruns from section 2 and invalidates checkpoint 2 with it, since its
-key includes checkpoint 1's. The chosen resolution is part of checkpoint 2's key, not
-checkpoint 1's, so trying another of the four never reclusters. The cluster calls follow from
+key includes checkpoint 1's. The chosen resolution and the chosen reference are part of
+checkpoint 2's key, not checkpoint 1's, so trying another resolution or reference never reclusters, and a run with each reference
+leaves its own checkpoint 2 side by side. The cluster calls follow from
 the composition and the purity threshold, so the threshold is part of checkpoint 2's key too.
 
 Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
@@ -189,7 +190,7 @@ decided by the same sweeps.
 
 ## Phase C — Cell-type annotation
 
-**Scope:** Per section, with the same references and the same purity threshold for the whole
+**Scope:** Per section, with the same reference and the same purity threshold for the whole
 cohort.
 
 Every cell is correlated against a reference, and each cluster is then named from the mix of
@@ -216,10 +217,12 @@ the per-cell calls, on defaults.
 | Reference | Species | Cell types | Values | Fit for this plan |
 |---|---|---|---|---|
 | Green et al. 2018 | Mouse | 11 major types; 32 in the collaborator's copy: 7 somatic, 9 Sertoli subtypes, 4 SPG, 12 germ-cell clusters | ln(mean TP10K + 1); 19 of the collaborator's 32 columns confirmed against GEO | Used first. Resolves the germ-cell stages that layering and staging need |
-| Shami et al. (`shami_human_testis_centroids.csv.gz`) | Human | 11 major types | ln(mean + 1) | Run alongside. Too coarse for staging; useful as a cross-check |
+| Shami et al. (`shami_human_testis_centroids.csv.gz`) | Human | 11 major types | ln(mean + 1) | The alternative. Too coarse for staging |
 
-**Annotation starts at Green's 11 major types,** with Shami run alongside as a cross-check.
-Finer types come later, by narrowing down from the major types rather than calling every cell
+**One reference at a time.** The reference is a setting of the notebook, Green or Shami, and a
+run annotates against that one only. **The first runs use Green's 11 major types.** Comparing
+the annotations the two give is left for later; because each reference gets its own
+checkpoint, that comparison needs no rerun. Finer types come later, by narrowing down from the major types rather than calling every cell
 against every subtype at once (see *Narrowing down*, below).
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
@@ -285,7 +288,7 @@ with centroids alone, from how specific each gene is to one type relative to the
 way they are limited to the 491 panel genes, and could be set beside each cluster's own
 markers to see whether the two agree.
 
-Calls must mean the same thing in every section for Phase I. The same references and the same
+Calls must mean the same thing in every section for Phase I. The same reference and the same
 90% threshold in every section are what make them comparable.
 
 ### Sweeps for later
@@ -294,7 +297,8 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 
 | Parameter | Default | Could try | How to judge it |
 |---|---|---|---|
-| Reference level | Green's 11 major types, with Shami | Green's fine level for every cell at once, rather than by narrowing down | Whether the fine calls agree with the narrowed-down ones |
+| Reference | Green's 11 major types | Shami | Agreement between the two annotations, cell by cell and cluster by cluster |
+| Reference level | Green's 11 major types | Green's fine level for every cell at once, rather than by narrowing down | Whether the fine calls agree with the narrowed-down ones |
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
 | Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or the computed reference markers | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
