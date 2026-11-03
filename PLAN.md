@@ -226,9 +226,24 @@ Shami is run alongside as a cross-check.
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
 RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/)):
-about 35,000 Drop-seq mouse testis cells. Its data is listed as GEO
-[GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), still to be
-checked for the counts and the cell-type labels the centroids need.
+about 35,000 Drop-seq mouse testis cells. Its data is GEO
+[GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), which lists three
+processed files (from a search of the record; not yet opened):
+
+| File | Size | Likely holds |
+|---|---|---|
+| `GSE112393_MergedAdultMouseST25_DGE.txt.gz` | 77.5 MB | The digital expression matrix: counts, genes by cells |
+| `GSE112393_MergedAdultMouseST25_PerCellAttributes.txt.gz` | 1.4 MB | Per-cell attributes, most likely including each cell's cluster |
+| `GSE112393_MergedAdultMouseST25_12GermCellClusters_AllGeneExp.xlsx` | 10.8 MB | Expression of every gene in the 12 germ-cell clusters |
+
+If the attributes file carries the cluster labels, the counts and labels together are all the
+recomputed centroids need, and also all a differential test for reference markers needs.
+
+**The reference is built once, outside the per-section notebook.** A separate notebook downloads
+these files, computes `ln(mean + 1)` per cell type over the 491 panel genes, and writes a centroid
+table to `assets/reference/`, the same shape as Shami's. Every per-section notebook then loads
+that small table rather than the full dataset. Computed reference markers, if wanted, are written
+beside it by the same notebook.
 
 A possible extra, not planned yet: reference marker genes computed from the reference data
 itself, rather than a list written by hand. How depends on what the reference comes as. With
@@ -340,7 +355,7 @@ or mixed models with animal as a random effect. Sections from one animal are not
 
 - [ ] Which sections are young and which old, and how many animals in each? (Do the a1, b2, c1,
       d2, 2a, 2b prefixes mark animals?)
-- [ ] Green reference: get the GSE112393 counts and cell-type labels, and recompute the centroids from them
+- [ ] Green reference: open the GSE112393 files, confirm the attributes file holds each cell's cluster, and build the centroids in their own notebook
 - [ ] Which image channels exist for tubule segmentation?
 - [ ] Where tubule polygons are stored, given the store is write-once
 - [ ] Has the collaborator staged any of these sections?
