@@ -37,6 +37,31 @@ each other.
 
 `NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
 
+### Notebook sections for Phases B and C
+
+The notebook's first sections, in order, with the two checkpoints marked:
+
+1. Load the section's table
+2. Filter cells
+3. Normalize
+4. PCA, neighbours and UMAP
+5. Leiden clustering
+6. Marker genes per cluster
+
+   **Checkpoint 1, clustered:** the filtered, clustered table with its markers.
+
+7. Per-cell correlation against each reference
+8. Cluster composition of the per-cell calls
+9. Cluster calls
+
+   **Checkpoint 2, annotated:** the table with per-cell and per-cluster calls.
+
+The split lets clustering and annotation be iterated on separately. Changing the correlation or
+the calls reruns only sections 7 to 9 from checkpoint 1; changing the clustering reruns from
+section 2 and invalidates checkpoint 2 with it, since its key includes checkpoint 1's. The
+cluster calls are made by hand, so they enter as a written table of cluster to type, and that
+table is part of checkpoint 2's key.
+
 ## Phase A — Segmentation and data QC
 
 **Scope:** Per section.
