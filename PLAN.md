@@ -1,5 +1,22 @@
 # Analysis plan
 
+## The data
+
+Each sample is one section of adult mouse testis, imaged on a Vizgen MERSCOPE. MERFISH reads out
+a panel of 491 genes, plus blank barcodes that measure false detections, as
+individual transcripts with their x, y and z positions across seven focal planes. The
+instrument also images the tissue itself, as mosaic images of the whole section.
+
+Cells were segmented in 3D with cellpose by the lab's own pipeline, and each transcript was
+assigned to the cell it falls in. What a section gives the analysis is a table of cells, on the
+order of 100,000 to 150,000 of them, each with its gene counts, its position, its volume and its outline in the
+tissue. Of the seven planes, a cell's outline is drawn from the one it covers most.
+
+There are 16 such sections, from young and old animals, all from one collaborator's dataset.
+The analysis below is written for one section; only the last phase brings sections together.
+
+## The biology
+
 Sperm are made inside the seminiferous tubules, and a cross-section of mouse testis cuts through
 many of them. Inside each tubule, germ cells mature from the outside in. Spermatogonia sit
 against the basement membrane; spermatocytes above them pass through meiosis; round spermatids
@@ -13,8 +30,10 @@ I to XII in mouse, and each stage is a fixed combination of germ cells at differ
 development. A single tubule cross-section sits at one stage, so one section of testis is a
 sample of the whole cycle, spread across its tubules.
 
-MERFISH measures 491 genes in every cell, in place, so a section can be read at all of these
-levels at once. For a section, the analysis:
+## The analysis
+
+Because MERFISH measures expression in every cell in place, a section can be read at all of
+these levels at once. For a section, the analysis:
 
 1. **Identifies every cell** by its expression: which somatic or germ cell type it is (Phases A
    to C).
@@ -166,6 +185,12 @@ its cells' calls alone. The per-cell method is the earlier pipeline's, carried o
 
    *Checkpoint 2: the annotated object.*
 
+9. **Narrow down, later.** Once the major types are called, take the cells of one type, recluster
+   them, and annotate the subclusters against that type's finer level by the same composition
+   rule: germ cells against GC1-12, and Sertoli cells or spermatogonia against their subtypes if
+   those are used. The major types already give the germ-cell order Phase E checks; staging
+   (Phase F) is what needs the finer level. Planned in detail once C1 to C8 run.
+
 ### References
 
 **One reference at a time.** The reference is a setting, Green or Shami, and a run annotates
@@ -175,23 +200,13 @@ reference's annotation is kept, so that comparison needs no rerun.
 | Reference | Species | Cell types | Values | Use |
 |---|---|---|---|---|
 | Green et al. 2018, 11 major types | Mouse | InnateLymph, Macrophage, Endothelial, Myoid, Leydig, Sertoli, Unknown (Tcf21+), SPG, Scytes, STids, Elongating | ln(mean TP10K + 1), rebuilt from the published counts and labels | **The first runs.** |
-| Green et al. 2018, germ-cell clusters | Mouse | GC1-GC12 | ln(mean TP10K + 1), as published | Narrowing down germ cells, for staging |
+| Green et al. 2018, germ-cell clusters | Mouse | GC1-GC12 | ln(mean TP10K + 1), as published | Narrowing down germ cells (C9), for staging |
 | Shami et al. | Human | 11 major types | ln(mean + 1) | The alternative |
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
 RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/));
 data at GEO [GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393). Each
 level is a reference of its own, never mixed into one table.
-
-### Narrowing down
-
-After the first annotation, the cells called as one major type are taken on their own,
-reclustered, and the subclusters annotated against that type's finer level, with the same
-composition rule: germ cells against GC1-12, and Sertoli cells or spermatogonia against their
-subtypes if those are used. The subclusters and their calls are added to the same object. It is
-planned in detail once the major-type annotation is done. The major types already give the
-germ-cell order Phase E checks (SPG, spermatocytes, round spermatids, elongating); staging
-(Phase F) is what needs the finer level.
 
 ### Sweeps for later
 
