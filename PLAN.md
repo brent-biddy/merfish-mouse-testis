@@ -148,12 +148,20 @@ on defaults, which makes no cluster-level call itself.
 
 | Reference | Species | Cell types | Values | Fit for this plan |
 |---|---|---|---|---|
-| Green et al. 2018, from the collaborator (`green_mouse_testis_centroids.csv.gz`) | Mouse | 32: 7 somatic, 9 Sertoli subtypes, 16 germ-cell types | Unconfirmed | Resolves the germ-cell stages that layering and staging need |
-| Shami et al. (`shami_human_testis_centroids.csv.gz`, current default) | Human | 11 major types | ln(mean + 1) | Too coarse for staging; useful as a cross-check |
+| Green et al. 2018 | Mouse | 32 in the collaborator's copy: 7 somatic, 9 Sertoli subtypes, 16 germ-cell types | The collaborator's copy (`green_mouse_testis_centroids.csv.gz`) is unconfirmed; to be recomputed as ln(mean + 1) | Used first. Resolves the germ-cell stages that layering and staging need |
+| Shami et al. (`shami_human_testis_centroids.csv.gz`) | Human | 11 major types | ln(mean + 1) | Run alongside. Too coarse for staging; useful as a cross-check |
 
-**Recommendation:** annotate with the Green mouse reference, once the collaborator confirms how
-its values were computed. Their own script uses Pearson on log2 counts per 1,000; ours is
-Spearman, which uses only ranks, so the scale matters less but still needs confirming.
+**Both references are used, Green first.** The Green centroids in the repo came from the
+collaborator, and how their values were computed is unknown, so they are not used as they
+stand. Instead the Green et al. 2018 data is tracked down and the centroids recomputed from it,
+the same way as Shami's (`ln(mean + 1)` per cell type), so the two references are built alike.
+Shami is run alongside as a cross-check.
+
+Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
+RNA-Seq*, Dev Cell 46(5):651-667 ([PubMed 30146481](https://pubmed.ncbi.nlm.nih.gov/30146481/)):
+about 35,000 Drop-seq mouse testis cells. Its data is listed as GEO
+[GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), still to be
+checked for the counts and the cell-type labels the centroids need.
 
 Calls must mean the same thing in every section for Phase I. One fixed reference does most of
 that; the hand-made cluster calls follow one written rulebook (marker genes per type, the 70%
@@ -165,7 +173,7 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 
 | Parameter | Default | Could try | How to judge it |
 |---|---|---|---|
-| Reference | Green (mouse) | Shami (human) | Agreement on the coarse types both have, once Green's 32 types are grouped to Shami's 11 |
+| Reference | Green and Shami, both run | Green's 32 types grouped to coarser levels | Agreement on the coarse types both have, once Green's types are grouped to Shami's 11 |
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
 | Genes | All genes the panel and reference share | Only each type's reference markers | Agreement with the all-gene calls; marker expression in the cells called |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
@@ -260,7 +268,7 @@ or mixed models with animal as a random effect. Sections from one animal are not
 
 - [ ] Which sections are young and which old, and how many animals in each? (Do the a1, b2, c1,
       d2, 2a, 2b prefixes mark animals?)
-- [ ] Reference: confirm with the collaborator how the Green centroids were computed, then annotate with it
+- [ ] Green reference: get the GSE112393 counts and cell-type labels, and recompute the centroids from them
 - [ ] Which image channels exist for tubule segmentation?
 - [ ] Where tubule polygons are stored, given the store is write-once
 - [ ] Has the collaborator staged any of these sections?
