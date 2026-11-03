@@ -42,7 +42,7 @@ each other.
 **Scope:** Per section.
 
 **Deferred.** The segmentations already run are accepted as they are, and the analysis moves on.
-The report's existing QC section stays as a first look. Ideas for when this is picked up:
+The report's existing QC section stays as a first look. QC metrics for when this is picked up:
 
 - Cells per section; transcripts, genes and volume per cell
 - Share of transcripts assigned to a cell; blank codewords against real genes
@@ -50,6 +50,23 @@ The report's existing QC section stays as a first look. Ideas for when this is p
   (`has_boundary`)
 - The same metrics drawn on tissue, to catch FOV seams, edge effects and damaged areas
 - The metrics compared across sections, pooled, to show an outlier section
+
+### Sweeps for later
+
+Not now. Where the segmentation could be varied, and what would show a choice is better. Every
+row but the last means re-running the lab's cellpose pipeline (`area_cellpose.py`, `merge.py`)
+outside this repo, then steps 1a and 1b, so these are the costliest sweeps in the plan.
+
+| Parameter | Default | Could try | How to judge it |
+|---|---|---|---|
+| Method | 3D cellpose, the lab's | Vizgen's own segmentation of the same region | Share of transcripts assigned; counts per cell; whether clustering and A3 calls agree. Two sample ids in one notebook compare them |
+| Cell diameter | As run | Smaller and larger | Cell size per type against what is expected; split cells (two neighbours, half size, same type) and merged ones (markers of mutually exclusive types together) |
+| Flow and cell-probability thresholds | As run | Looser and stricter | Cells found; share of transcripts assigned; how many small fragments appear |
+| Input stains | As run | DAPI alone; DAPI with a membrane or polyT stain | The same checks as cell diameter |
+| Boundary plane | The plane each cell covers most | One fixed plane | Cells left without a polygon; transcripts falling outside the polygon drawn for their cell |
+
+The default values for the cellpose rows are whatever the lab's runs used; they are not
+recorded in this repo yet.
 
 ## Phase A2 — Filtering and clustering
 
