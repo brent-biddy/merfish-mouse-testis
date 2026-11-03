@@ -14,7 +14,7 @@ built for the section.
 It is worked out end to end on one section, b2r0, before it runs on the other 15: every phase
 up to I is settled there first, and Phase J follows once every section is through I. Anything
 learned on a later section that changes a step goes back to b2r0 too, so all 16 are analysed
-the same way. `NOTES.md` tracks where the runs stand.
+the same way. The GitHub Project tracks where the runs stand, with one issue per section.
 
 ## One object
 
