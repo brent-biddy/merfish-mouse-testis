@@ -6,21 +6,13 @@ cell-type proportions, gene and signalling dynamics, and the interstitium be com
 and finally between young and old animals. Phases A to H run per section;
 only I pools sections.
 
-`NOTES.md` tracks where the runs stand; this file is what the analysis is for and in what order.
-
-## How the analysis is run
-
 The analysis is worked out end to end on one section, b2r0, before it touches the others:
 phases A to H are settled there first, then run on the remaining 15 sections, and I follows
 once every section is through H. Anything learned on the later sections that changes a step
 goes back to b2r0 too, so all 16 are analysed the same way.
 
-The per-section analysis is one Quarto notebook rather than the `bin/` scripts, built up a
-section at a time in phase order. It starts from the store and table steps 1a and 1b already
-wrote; the steps after those are a reference for the recipe, not what runs.
-
-How the notebook is built (its sections, checkpoints, and where they are written) is in
-`NOTEBOOK.md`; this file is what the analysis does.
+This file is what the analysis does and in what order. `NOTEBOOK.md` is how the notebook that
+runs it is built, and `NOTES.md` tracks where the runs stand.
 
 ## Phase A — Segmentation and data QC
 
@@ -176,10 +168,8 @@ So the scale question is settled for 19 of 32 columns, and they need no recomput
 collaborator's values are the published ones. The 13 subtype columns cannot be rebuilt from
 public data.
 
-**The reference is built once, outside the per-section notebook.** A separate notebook downloads
-these files and writes centroid tables to `assets/reference/`, the same shape as Shami's, over
-the 491 panel genes. Every per-section notebook then loads those small tables rather than the
-full dataset. Two levels come out of it:
+**Two Green references are built from it,** once for the whole cohort, each over the 491 panel
+genes:
 
 - **Green, 11 major types,** recomputed from the counts and labels. Coarse, and every column is
   reproducible from public data. This is the one the first annotation uses.
@@ -190,10 +180,6 @@ Each level is a reference of its own, not one table mixing them. The collaborato
 mix levels: a `Sertoli` column beside nine Sertoli subtypes built from the same cells, and SPG
 subtypes beside germ clusters that include spermatogonia. Calling cells against such a table
 splits a Sertoli cell's vote across ten near-identical columns, and no cluster reaches 90%.
-
-Seven panel genes are missing from the counts under the panel's names, and nine from the
-spreadsheet, being newer symbols for renamed genes (`Prxl2a`, `Plpp3`, `Mesd`, `Meioc`, ...).
-The reference notebook maps them to their older names rather than dropping them.
 
 **Narrowing down, after the first annotation.** A cluster called as one major type is taken
 on its own, reclustered, and its subclusters annotated against the finer level for that type:

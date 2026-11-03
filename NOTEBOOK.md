@@ -3,6 +3,10 @@
 How the per-section Quarto notebook is built. `PLAN.md` is what the analysis does and in what
 order; this file is how the notebook carries it out. Only Phases B and C are designed so far.
 
+The per-section analysis is one Quarto notebook rather than the `bin/` scripts, built up a
+section at a time in phase order. It starts from the store and table steps 1a and 1b already
+wrote; the later steps are a reference for the recipe, not what runs.
+
 ## One object
 
 **One object passes through the whole notebook.** Section 1 loads the section's table as a
@@ -90,3 +94,14 @@ scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no qu
 rapids-singlecell mirrors scanpy's API, so moving over is a switch in the notebook rather than
 a rewrite. The two Leiden implementations do not give identical clusters, so the backend is
 part of checkpoint 1's key.
+
+## Reference notebook
+
+The Green references are built once, in a notebook of their own, not in the per-section one.
+It downloads the GSE112393 files and writes each reference level as its own centroid table to
+`assets/reference/`, the same shape as Shami's. Every per-section notebook loads those small
+tables rather than the full dataset, which is never in its memory.
+
+Seven panel genes are missing from the counts under the panel's names, and nine from the
+germ-cell spreadsheet, being newer symbols for renamed genes (`Prxl2a`, `Plpp3`, `Mesd`,
+`Meioc`, ...). The reference notebook maps them to their older names rather than dropping them.
