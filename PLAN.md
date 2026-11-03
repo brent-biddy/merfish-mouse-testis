@@ -13,8 +13,9 @@ goes back to b2r0 too, so all 16 are analysed the same way.
 
 The whole analysis runs in one self-contained Quarto notebook, no `bin/` scripts, starting from
 the store and table the segmentation steps already wrote. This file is what the analysis does and
-in what order. `NOTEBOOK.md` is how the notebook is built, and `NOTES.md` tracks where the runs
-stand.
+in what order: each phase decided so far lists its steps, with the functions they call, in the
+order the notebook runs them. A step is named by phase and number, B3 or C5. `NOTEBOOK.md` is
+how the notebook is wired across steps, and `NOTES.md` tracks where the runs stand.
 
 ## Phase A — Segmentation and data QC
 
@@ -50,22 +51,30 @@ and does removing them change the clusters or the Phase C calls.
 
 **The priority is to reach cell-type annotations (Phase C),** so Phases B and C run on defaults,
 untuned. Where a sweep could improve them, and how to judge it, is noted at the end of each
-phase and left for later. The recipe is the earlier pipeline's, carried over:
+phase and left for later. The recipe is the earlier pipeline's, carried over, on scanpy (`sc`).
 
-| Stage | Default |
-|---|---|
-| Filter, low | Drop cells under 20 transcripts |
-| Filter, high | Off; when on, the top quantile of transcript counts is dropped for doublets and merged cells, taken before the low cut |
-| Genes | All panel genes kept: no highly-variable selection and no gene filter, since the 491-gene panel is already curated |
-| Normalize | Total counts scaled to the section's median cell total, then log1p |
-| Scale | Unit variance, not centred, clipped at 10 |
-| PCA | 30 components |
-| Neighbors | Cosine distance, k = 15 |
-| UMAP | On that graph |
-| Leiden | Resolutions 0.5, 1.0, 1.5 and 2.0; 1.0 is the one annotated; random seed 0 |
+### Steps
 
-Clusters are numbered 1..k by size, so cluster 1 is the largest, and every call and figure names
-a cluster by that number.
+1. **Load the section's table.** `adata = anndata.read_h5ad(table_path)`, one AnnData that every
+   later step adds to. Keep the raw counts: `adata.layers["counts"] = adata.X.copy()`.
+2. **Filter cells.** `sc.pp.filter_cells(adata, min_counts=20)`. The high cut is off; when on,
+   its threshold is `adata.obs["transcript_count"].quantile(q)`, taken before the low cut, then
+   `sc.pp.filter_cells(adata, max_counts=threshold)`. All 491 genes are kept: no
+   highly-variable selection and no gene filter, since the panel is already curated.
+3. **Normalize.** `sc.pp.normalize_total(adata)` scales every cell to the section's median
+   total, then `sc.pp.log1p(adata)`. Keep the result for markers:
+   `adata.layers["lognorm"] = adata.X.copy()`.
+4. **Scale.** `sc.pp.scale(adata, zero_center=False, max_value=10)`: unit variance, not centred.
+5. **PCA.** `sc.pp.pca(adata, n_comps=30, random_state=0)`.
+6. **Neighbour graph.** `sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)`.
+7. **UMAP.** `sc.tl.umap(adata, random_state=0)`.
+8. **Leiden at 0.5, 1.0, 1.5 and 2.0.** For each resolution `r`:
+   `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph",
+   n_iterations=2, random_state=0)`, then renumber its clusters 1..k by size with our own
+   `relabel_by_size()`, so cluster 1 is the largest. Every call and figure names a cluster by
+   that number.
+
+   *Checkpoint 1: the clustered object.*
 
 Four resolutions are written so annotation can move to another without reclustering. 1.0 may
 turn out too coarse once annotation narrows down to finer types: germ cells are a continuous
@@ -99,22 +108,45 @@ cohort, which is what makes calls comparable across sections for Phase I.
 Every cell is correlated against a reference, and each cluster is then named from the mix of
 its cells' calls alone. The per-cell method is the earlier pipeline's, carried over.
 
-0. **Build the reference, once for the cohort.** Before any section is annotated, the reference
-   is built from its source data and saved; every later section reuses it.
-1. **Per-cell correlation.** Spearman correlation of each cell's raw counts against every
-   reference cell type, over the genes the panel and reference share. Genes match
-   case-insensitively, so mouse `Acta2` finds human `ACTA2`.
-2. **Standardize within each cell.** A cell's correlation to every type rises with the genes it
-   captured, so correlations are z-scored per cell. This cannot change a cell's top type; it
-   makes cells comparable with each other.
-3. **Per-cell call.** Each cell's call is the type it correlates with most; every type's score
-   is kept.
-4. **Cluster composition.** Each cluster's share of cells per called type.
-5. **Cluster call.** A cluster is named when one type takes at least 90% of its cells; below
-   that it is called Ambiguous, and its evidence is laid out on its own.
-6. **Cluster markers, alongside.** Each cluster's top marker genes, at the resolution being
-   annotated, are shown next to its composition to see whether they are informative. They are
-   not used to make or check a call, and no marker list is defined for the reference cell types.
+### Steps
+
+0. **Build or load the reference, once for the cohort.** If the reference is already saved,
+   load it. Otherwise build it and save it, so the first section builds it and the rest load it:
+   - *Green, 11 major types:* read the GEO counts in chunks, `pd.read_csv(dge, sep="\t",
+     index_col=0, chunksize=...)`, summing every cell's total over all genes and keeping only
+     the panel genes' rows. Read the per-cell types, `pd.read_csv(attributes, sep="\t",
+     comment="#", header=None)`. Then TP10K = panel counts / cell total x 10,000, mean per type
+     with `groupby(...).mean()`, and `np.log1p`.
+   - *Green, GC1-12:* `pd.read_excel(xlsx, sheet_name="Average")`, the panel genes' rows.
+   - *Shami:* `pd.read_csv` of the table already in the repo.
+   - Map panel genes renamed since the reference was made to the names it uses, with our own
+     `match_panel_genes()`, rather than dropping them.
+
+   Store the chosen reference in `adata.uns["reference"]`.
+1. **Choose the resolution.** `cluster_key = "leiden_1.0"` to start.
+2. **Marker genes per cluster.** `sc.tl.rank_genes_groups(adata, groupby=cluster_key,
+   layer="lognorm", method="wilcoxon")`, read back with `sc.get.rank_genes_groups_df`.
+3. **Per-cell correlation.** Over the genes the panel and reference share, matched
+   case-insensitively so mouse `Acta2` finds human `ACTA2`: rank each cell's raw counts,
+   `scipy.stats.rankdata(adata[:, shared].layers["counts"], axis=1)`, rank each reference type
+   the same way, and correlate the ranks, `1 - scipy.spatial.distance.cdist(cell_ranks,
+   type_ranks, metric="correlation")`. That is Spearman correlation, cell by type.
+4. **Standardize within each cell.** Subtract each cell's mean correlation and divide by its
+   standard deviation. A cell's correlation to every type rises with the genes it captured; this
+   makes cells comparable with each other without changing any cell's top type. Write
+   `adata.obs[f"corr_{type}"]` for every type.
+5. **Per-cell call.** The type each cell correlates with most, `idxmax(axis=1)`, written to
+   `adata.obs["cell_type"]`.
+6. **Cluster composition.** `pd.crosstab(adata.obs[cluster_key], adata.obs["cell_type"],
+   normalize="index")`: each cluster's share of cells per called type, kept in `adata.uns`.
+7. **Cluster call.** A cluster is named for its top type when that type takes at least 90% of
+   its cells, and Ambiguous otherwise, written to `adata.obs["cluster_type"]`. Each Ambiguous
+   cluster's evidence is laid out on its own.
+8. **Markers alongside.** Each cluster's top markers from step 2 are shown next to its
+   composition, to see whether they are informative. They are not used to make or check a call,
+   and no marker list is defined for the reference cell types.
+
+   *Checkpoint 2: the annotated object.*
 
 ### References
 
