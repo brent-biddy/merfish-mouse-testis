@@ -115,8 +115,29 @@ Step 4 (`bin/create_centroids.py`) sums counts and CP10K per cluster at every re
 Sums pool, so any union of clusters is the sum of its rows, and `log1p(X / n_cells)` is
 comparable to the `ln(mean + 1)` reference centroids.
 
-Marker genes per cluster are not part of this phase: they are computed at the resolution being
-annotated, in notebook section 7 (see *Notebook sections for Phases B and C*, after Phase C).
+### Notebook sections
+
+1. Load the section's table
+2. Filter cells
+3. Normalize
+4. PCA, neighbours and UMAP
+5. Leiden clustering at 0.5, 1.0, 1.5 and 2.0
+
+   **Checkpoint 1, clustered:** the filtered table with a cluster column per resolution.
+
+Changing anything here reruns sections 2 to 5, and invalidates Phase C's checkpoint 2 with it,
+since that key includes checkpoint 1's. Marker genes are not computed here: they depend on
+the resolution being annotated, so they are Phase C's first section.
+
+Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
+cheap, and because Phase C can then try another resolution without reclustering. 1.0 may turn
+out too coarse once annotation narrows down to finer types: germ cells are a continuous
+trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether its
+clusters are fine enough to match the reference's types.
+
+A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
+or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
+b2r0 turns out slow.
 
 **The notebook starts on CPU (scanpy).** b2r0 has about 147,000 cells after filtering, over
 491 genes, which CPU clusters in minutes, and a CPU job runs on any OSCER node or locally with
@@ -127,7 +148,7 @@ clusters faster, but OSCER's GPU queue is the wait: step 2's jobs on `sooner_gpu
 scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no queue.
 rapids-singlecell mirrors scanpy's API, so moving over is a switch in the notebook rather than
 a rewrite. The two Leiden implementations do not give identical clusters, so the backend is
-part of checkpoint 1's key (see *Notebook sections for Phases B and C*).
+part of checkpoint 1's key.
 
 ### Sweeps for later
 
@@ -252,6 +273,26 @@ markers to see whether the two agree.
 Calls must mean the same thing in every section for Phase I. The same reference and the same
 90% threshold in every section are what make them comparable.
 
+### Notebook sections
+
+Numbering continues from Phase B's.
+
+6. Choose the resolution to annotate, 1.0 to start
+7. Marker genes per cluster, at that resolution
+8. Per-cell correlation against the chosen reference
+9. Cluster composition of the per-cell calls
+10. Cluster calls
+
+    **Checkpoint 2, annotated:** the whole table, with everything sections 1 to 10 added: the
+    clusters at every resolution, the markers, every `corr_<type>` score, the per-cell calls and
+    the cluster calls. The later phases read whichever columns they need from it, so which
+    label each one uses is decided when that phase is built.
+
+Changing the resolution, the markers, the correlation or the calls reruns only sections 6 to
+10, starting from checkpoint 1, so annotation is iterated on without reclustering. The
+resolution, the reference and the purity threshold are all part of checkpoint 2's key, so a run
+with each reference leaves its own checkpoint 2 side by side.
+
 ### Sweeps for later
 
 Not now. Where the defaults could be swept, and what would show a choice is better:
@@ -270,47 +311,6 @@ ranks, so Spearman gives the same answer on any of them.
 
 Whatever the setting, a call can be sanity-checked by where the type sits in tissue, such as
 germ cells inside tubules and Leydig cells outside them.
-
-## Notebook sections for Phases B and C
-
-The notebook's first sections, in order, with the two checkpoints marked:
-
-1. Load the section's table
-2. Filter cells
-3. Normalize
-4. PCA, neighbours and UMAP
-5. Leiden clustering at a few resolutions: 0.5, 1.0, 1.5 and 2.0
-
-   **Checkpoint 1, clustered:** the filtered table with a cluster column per resolution.
-
-6. Choose the resolution to annotate, 1.0 to start
-7. Marker genes per cluster, at that resolution
-8. Per-cell correlation against the chosen reference
-9. Cluster composition of the per-cell calls
-10. Cluster calls
-
-    **Checkpoint 2, annotated:** the whole table, with everything sections 1 to 10 added: the
-    clusters at every resolution, the markers, every `corr_<type>` score, the per-cell calls and
-    the cluster calls. The later phases read whichever columns they need from it, so which
-    label each one uses is decided when that phase is built.
-
-The split lets clustering and annotation be iterated on separately. Changing the resolution,
-the markers, the correlation or the calls reruns only sections 6 to 10 from checkpoint 1;
-changing the clustering reruns from section 2 and invalidates checkpoint 2 with it, since its
-key includes checkpoint 1's. The chosen resolution and the chosen reference are part of
-checkpoint 2's key, not checkpoint 1's, so trying another resolution or reference never reclusters, and a run with each reference
-leaves its own checkpoint 2 side by side. The cluster calls follow from
-the composition and the purity threshold, so the threshold is part of checkpoint 2's key too.
-
-Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
-cheap, and because 1.0 may be too coarse for the Green reference: the earlier b2r0 report had
-19 clusters at 1.0, several Ambiguous, against Green's 32 types, 16 of them germ cells. Germ
-cells are a continuous trajectory that Leiden cuts at arbitrary points, so what a resolution is
-judged by is whether its clusters are fine enough to match the reference's types.
-
-A third checkpoint could go after normalization (section 3), so that changing PCA, neighbours
-or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
-b2r0 turns out slow.
 
 ## Phase D — Identify tubules
 
