@@ -66,17 +66,16 @@ A third checkpoint could go after normalization (section 3), so that changing PC
 or Leiden does not redo filtering and normalization. Not needed yet; add it if clustering
 b2r0 turns out slow.
 
-**CPU or GPU is not decided.** b2r0 has about 147,000 cells after filtering, over 491 genes.
+**The notebook starts on CPU (scanpy).** b2r0 has about 147,000 cells after filtering, over
+491 genes, which CPU clusters in minutes, and a CPU job runs on any OSCER node or locally with
+little or no wait.
 
-- GPU (rapids-singlecell, as step 2 used) clusters in minutes, but OSCER's GPU queue is the
-  wait: step 2's jobs on `sooner_gpu_test` were scheduled hours apart, the last a day out.
-  The `wsl` machine's own GPU has no queue.
-- CPU (scanpy) is slower to cluster, likely minutes rather than seconds at this size, but runs on
-  any OSCER node or locally with little or no wait.
-
-rapids-singlecell mirrors scanpy's API, so the notebook can take a switch between the two rather
-than committing to one. The two Leiden implementations do not give identical clusters, so the
-backend is part of checkpoint 1's key.
+GPU (rapids-singlecell, as step 2 used) is the option if clustering becomes the slow part. It
+clusters faster, but OSCER's GPU queue is the wait: step 2's jobs on `sooner_gpu_test` were
+scheduled hours apart, the last a day out. The `wsl` machine's own GPU has no queue.
+rapids-singlecell mirrors scanpy's API, so moving over is a switch in the notebook rather than
+a rewrite. The two Leiden implementations do not give identical clusters, so the backend is
+part of checkpoint 1's key.
 
 ## Phase A — Segmentation and data QC
 
