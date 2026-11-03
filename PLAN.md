@@ -1,6 +1,6 @@
 # Analysis plan
 
-Dated 2026-11-02. Each of Alex Vargo's 16 mouse testis sections is analysed on its own: QC,
+Dated 2026-11-02. Each of the collaborator's 16 mouse testis sections is analysed on its own: QC,
 clustering and cell-type annotation, then tubules identified, layered and staged. That lets
 cell-type proportions, gene and signalling dynamics, and the interstitium be compared by stage,
 and finally between young and old animals.
@@ -109,12 +109,12 @@ the mix of its cells' calls. Step 3 makes no cluster-level call itself.
 
 | Reference | Species | Cell types | Values | Fit for this plan |
 |---|---|---|---|---|
-| Green et al. 2018, from Alex (`green_mouse_testis_centroids.csv.gz`) | Mouse | 32: 7 somatic, 9 Sertoli subtypes, 16 germ-cell types | Unconfirmed | Resolves the germ-cell stages that layering and staging need |
+| Green et al. 2018, from the collaborator (`green_mouse_testis_centroids.csv.gz`) | Mouse | 32: 7 somatic, 9 Sertoli subtypes, 16 germ-cell types | Unconfirmed | Resolves the germ-cell stages that layering and staging need |
 | Shami et al. (`shami_human_testis_centroids.csv.gz`, current default) | Human | 11 major types | ln(mean + 1) | Too coarse for staging; useful as a cross-check |
 
-**Recommendation:** annotate with the Green mouse reference, once Alex confirms how its values
-were computed. His own script uses Pearson on log2 counts per 1,000; ours is Spearman, which
-uses only ranks, so the scale matters less but still needs confirming.
+**Recommendation:** annotate with the Green mouse reference, once the collaborator confirms how
+its values were computed. Their own script uses Pearson on log2 counts per 1,000; ours is
+Spearman, which uses only ranks, so the scale matters less but still needs confirming.
 
 Calls must mean the same thing in every section for Phase G. One fixed reference does most of
 that; the hand-made cluster calls follow one written rulebook (marker genes per type, the 70%
@@ -156,7 +156,7 @@ which germ cells occur together.
 - **Unsupervised:** a composition or pseudobulk profile per tubule, ordered around the cycle;
   tubule profiles often form a ring.
 - Realistic target: stage groups (I-III, IV-VI, VII-VIII, IX-XII) rather than all twelve.
-- Ask Alex whether these sections have been staged before; that is a ready validation set.
+- Ask the collaborator whether these sections have been staged before; that is a ready validation set.
 
 ## Phase E — Within the tubule, by stage
 
@@ -189,10 +189,10 @@ or mixed models with animal as a random effect. Sections from one animal are not
 
 - [ ] Which sections are young and which old, and how many animals in each? (Do the a1, b2, c1,
       d2, 2a, 2b prefixes mark animals?)
-- [ ] Reference: confirm with Alex how the Green centroids were computed, then annotate with it
+- [ ] Reference: confirm with the collaborator how the Green centroids were computed, then annotate with it
 - [ ] Resolution: one for all sections, or chosen per section?
 - [ ] Filter thresholds: fixed, or set per section?
 - [ ] Which image channels exist for tubule segmentation?
 - [ ] Where tubule polygons are stored, given the store is write-once
-- [ ] Has Alex staged any of these sections?
+- [ ] Has the collaborator staged any of these sections?
 - [ ] Which ligand-receptor pairs the panel covers
