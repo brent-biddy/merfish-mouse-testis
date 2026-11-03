@@ -196,19 +196,10 @@ its cells' calls alone.
    | Sertoli, SPG subtypes | The collaborator's file, if cleared for use | Open question |
    | Leydig, Macrophage, Endothelial, Myoid, InnateLymph, Unknown (Tcf21+) | None yet | Later; other references to find |
 
-   The result is each cell's fine cell type, **which is what every later phase reads.** A cell
-   of a type with no fine reference keeps its major label there, marked as never subclustered,
-   so those cells can be told apart from the ones that were. A cell in a subcluster left
-   unresolved by hand is excluded at the fine level, counted separately from a major-level
-   exclusion, so each level's losses can be seen. Adding a reference for another type is filling
-   in one row of this table.
-
-   The germ-cell subclusters are a continuum that Leiden cuts at arbitrary points, so the
-   fine level may flag more clusters than the major one; its purity threshold is tested on its
-   own (see the sweeps below).
-
-   - Plots: the plots of steps 2 to 8 are drawn again at the fine level, for each subclustered
-     type.
+   The result is each cell's fine cell type, **which is what every later phase reads.** A type
+   with no fine reference keeps its major label, and cells in subclusters left unresolved by
+   hand are excluded.
+   - Plots: steps 2 to 8 are drawn again at the fine level.
 
 ### References
 
