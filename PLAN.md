@@ -53,9 +53,11 @@ The report's existing QC section stays as a first look. QC metrics for when this
 
 ### Sweeps for later
 
-Not now. Where the segmentation could be varied, and what would show a choice is better. Every
-row but the last means re-running the lab's cellpose pipeline (`area_cellpose.py`, `merge.py`)
-outside this repo, then steps 1a and 1b, so these are the costliest sweeps in the plan.
+Not now. Where the segmentation could be varied, and what would show a choice is better. The
+three cellpose rows mean re-running the lab's cellpose pipeline (`area_cellpose.py`,
+`merge.py`) outside this repo, then steps 1a and 1b, so they are the costliest sweeps in the
+plan. Vizgen's own segmentation is already in each region directory and needs only step 1; the
+boundary plane needs only step 1a.
 
 | Parameter | Default | Could try | How to judge it |
 |---|---|---|---|
