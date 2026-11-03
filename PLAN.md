@@ -15,39 +15,37 @@ goes back to b2r0 too, so all 16 are analysed the same way.
 
 ## Phase A1 — Segmentation and data QC
 
-**Scope:** Per section. Could also be pooled: comparing the metrics across sections is what
-would show an outlier section.
+**Scope:** Per section.
 
-Each section gets a QC pass before any thresholds are set, so a bad region is caught here
-rather than in a figure.
+**Deferred.** The segmentations already run are accepted as they are, and the analysis moves on.
+The report's existing QC section stays as a first look. Ideas for when this is picked up:
 
 - Cells per section; transcripts, genes and volume per cell
 - Share of transcripts assigned to a cell; blank codewords against real genes
 - Which z-plane each boundary came from (`obs["z_plane"]`), and cells with no polygon
   (`has_boundary`)
 - The same metrics drawn on tissue, to catch FOV seams, edge effects and damaged areas
-
-The report already has a QC section; the on-tissue QC maps are new.
+- The metrics compared across sections, pooled, to show an outlier section
 
 ## Phase A2 — Filtering and clustering
 
-**Scope:** Per section. Whether the filter thresholds and the resolution are set once for the
-cohort or per section is still open.
+**Scope:** Per section, with one default recipe for every section.
 
 Step 2 (`bin/cluster_spatialdata_gpu.py`) clusters each section on the GPU with
-rapids-singlecell, using one fixed recipe, and writes a Leiden sweep rather than a single answer.
+rapids-singlecell. For now every section runs the step's defaults unchanged, and the report
+reads resolution 1.0 (`RESOLUTION`) for all of them; the parameters are not tuned yet.
 
-| Stage | What the step does |
+| Stage | Default |
 |---|---|
 | Filter, low | Drop cells under 20 transcripts (`--min_counts`) |
-| Filter, high | Drop the top quantile of transcript counts, for doublets and merged cells (`--max_counts_quantile`); off by default, and taken before the low cut |
+| Filter, high | Off (`--max_counts_quantile`); when on, the top quantile of transcript counts is dropped for doublets and merged cells, taken before the low cut |
 | Genes | All panel genes kept: no highly-variable selection and no gene filter, since the 491-gene panel is already curated |
 | Normalize | Total counts scaled to the section's median cell total, then log1p |
 | Scale | Unit variance, not centred, clipped at 10 |
 | PCA | 30 components |
 | Neighbors | Cosine distance, rapids default k = 15 |
 | UMAP | On that graph |
-| Leiden | Resolutions 0.1 to 2.0 in steps of 0.1; random seed 0 throughout |
+| Leiden | Resolutions 0.1 to 2.0 in steps of 0.1, all written; 1.0 is the one read; random seed 0 throughout |
 
 Each resolution leaves two columns. `_v0` is Leiden's own labelling; `_v1` renumbers clusters
 1..k by size, so cluster 1 is the largest. **v1 is what every call and figure names a cluster
@@ -61,12 +59,15 @@ Step 4 (`bin/create_centroids.py`) then sums counts and CP10K per cluster at eve
 Sums pool, so any union of clusters is the sum of its rows, and `log1p(X / n_cells)` is
 comparable to the `ln(mean + 1)` reference centroids.
 
-Per section, still to do:
+Still to do now:
 
-- Choose the resolution. The report reads one (`RESOLUTION`, 1.0 today); choose by stability
-  across the sweep and by how cleanly markers separate.
 - Add top marker genes per cluster; the report does not show them yet.
-- Decide whether filter thresholds are fixed for all sections or set per section.
+
+Later, once the default has been carried through the rest of the analysis:
+
+- Sweep the filter thresholds and the clustering parameters (PCs, neighbours, resolution) and
+  evaluate the choices, by stability across the sweep and by how cleanly markers separate
+- Decide whether thresholds and resolution are fixed for the cohort or set per section
 
 ## Phase A3 — Cell-type annotation
 
@@ -185,8 +186,6 @@ or mixed models with animal as a random effect. Sections from one animal are not
 - [ ] Which sections are young and which old, and how many animals in each? (Do the a1, b2, c1,
       d2, 2a, 2b prefixes mark animals?)
 - [ ] Reference: confirm with the collaborator how the Green centroids were computed, then annotate with it
-- [ ] Resolution: one for all sections, or chosen per section?
-- [ ] Filter thresholds: fixed, or set per section?
 - [ ] Which image channels exist for tubule segmentation?
 - [ ] Where tubule polygons are stored, given the store is write-once
 - [ ] Has the collaborator staged any of these sections?
