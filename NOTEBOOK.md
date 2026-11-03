@@ -70,6 +70,20 @@ later phases read whichever columns they need from it.
 A checkpoint after B3 could be added so that changing PCA, neighbours or Leiden does not redo
 filtering and normalization. Not needed yet; add it if clustering b2r0 turns out slow.
 
+## One clustering function, two levels
+
+Steps B3 to B8 are one function, `cluster_cells(adata)`, and the same function reclusters a
+single cell type's cells in C9. Nothing is reused between levels: the subset starts again from
+its raw counts layer and runs the same normalize, scale, PCA, neighbours, UMAP and Leiden calls
+with the same parameters. Only the filter (B2) is skipped, since those cells already passed it.
+
+- Normalization means the subset's own median total, so log-normalized values are on a
+  different scale at each level. Anything compared across levels starts from counts.
+- A subset too small for 30 PCs or k = 15 raises an error rather than quietly changing the
+  recipe.
+- Four resolutions are written at each level so annotation can move to another without
+  reclustering.
+
 ## The reference cache
 
 C0 is the first step any run reaches that needs the reference. Its checkpoint is written at

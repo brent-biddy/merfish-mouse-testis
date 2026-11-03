@@ -106,19 +106,12 @@ phase and left for later. The recipe is the earlier pipeline's, carried over, on
 
    *Checkpoint 1: the clustered object.*
 
-Steps 3 to 8 are one function, `cluster_cells(adata)`, and the same function reclusters a
-single cell type's cells in Phase C step 9. Nothing is reused between levels: the subset starts
-again from its raw counts layer and runs the same normalize, scale, PCA, neighbours, UMAP and
-Leiden calls with the same parameters. Only the filter (step 2) is skipped, since those cells
-already passed it. Normalization then means the subset's own median total, so log-normalized
-values are on a different scale at each level; anything compared across levels starts from
-counts. A subset too small for 30 PCs or k = 15 raises an error rather than quietly changing
-the recipe.
+The same recipe, steps 3 to 8, is used again when a single cell type is subclustered in
+Phase C step 9, restarted from its raw counts rather than reusing the section-wide result.
 
-Four resolutions are written so annotation can move to another without reclustering. 1.0 may
-turn out too coarse once annotation narrows down to finer types: germ cells are a continuous
-trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether its
-clusters are fine enough to match the reference's types.
+1.0 may turn out too coarse once annotation narrows down to finer types: germ cells are a
+continuous trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether
+its clusters are fine enough to match the reference's types.
 
 ### Sweeps for later
 
