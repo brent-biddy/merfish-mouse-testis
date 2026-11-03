@@ -55,7 +55,10 @@ The notebook's first sections, in order, with the two checkpoints marked:
 9. Cluster composition of the per-cell calls
 10. Cluster calls
 
-    **Checkpoint 2, annotated:** the table with per-cell and per-cluster calls, and the markers.
+    **Checkpoint 2, annotated:** the whole table, with everything sections 1 to 10 added: the
+    clusters at every resolution, the markers, every `corr_<type>` score, the per-cell calls and
+    the cluster calls. The later phases read whichever columns they need from it, so which
+    label each one uses is decided when that phase is built.
 
 The split lets clustering and annotation be iterated on separately. Changing the resolution,
 the markers, the correlation or the calls reruns only sections 6 to 10 from checkpoint 1;
