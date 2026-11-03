@@ -61,9 +61,8 @@ The split lets clustering and annotation be iterated on separately. Changing the
 the markers, the correlation or the calls reruns only sections 6 to 10 from checkpoint 1;
 changing the clustering reruns from section 2 and invalidates checkpoint 2 with it, since its
 key includes checkpoint 1's. The chosen resolution is part of checkpoint 2's key, not
-checkpoint 1's, so trying another of the four never reclusters. The cluster calls are made by
-hand, so they enter as a written table of cluster to type, and that table is part of
-checkpoint 2's key too.
+checkpoint 1's, so trying another of the four never reclusters. The cluster calls follow from
+the composition and the purity threshold, so the threshold is part of checkpoint 2's key too.
 
 Four resolutions rather than one because extra Leiden runs on the same neighbour graph are
 cheap, and because 1.0 may be too coarse for the Green reference: the earlier b2r0 report had
@@ -174,11 +173,12 @@ decided by the same sweeps.
 
 ## Phase C — Cell-type annotation
 
-**Scope:** Per section, against one reference and one rulebook fixed for the whole cohort.
+**Scope:** Per section, with the same references and the same purity threshold for the whole
+cohort.
 
-Every cell is correlated against a reference, and each cluster is then named by a person from
-the mix of its cells' calls. The notebook follows step 3's method (`bin/annotate_celltypes.py`),
-on defaults, which makes no cluster-level call itself.
+Every cell is correlated against a reference, and each cluster is then named from the mix of
+its cells' calls alone. The notebook follows step 3's method (`bin/annotate_celltypes.py`) for
+the per-cell calls, on defaults.
 
 1. **Per-cell correlation.** Spearman correlation of each
    cell's raw counts against every reference cell type, over the genes the panel and reference
@@ -190,9 +190,12 @@ on defaults, which makes no cluster-level call itself.
 3. **Per-cell call.** `cell_type_per_cell` is the type with the highest correlation; every
    type's value is kept as `corr_<type>`.
 4. **Cluster composition (report).** Each cluster's share of cells per called type.
-5. **Cluster call (by hand).** A cluster is named when one type takes at least 70% of its cells
-   (`PURITY_THRESHOLD`). Below that it is called Ambiguous, and gets its own slide laying out
-   the evidence.
+5. **Cluster call.** A cluster is named when one type takes at least 90% of its cells. Below
+   that it is called Ambiguous, and gets its own slide laying out the evidence. The earlier
+   report used 70% (`PURITY_THRESHOLD`); 90% asks for a much clearer majority.
+6. **Cluster markers, alongside.** Each cluster's top marker genes, from notebook section 7,
+   are shown next to its composition to see whether they are informative. They are not used to
+   make or check a call, and no marker list is defined for the reference cell types.
 
 | Reference | Species | Cell types | Values | Fit for this plan |
 |---|---|---|---|---|
@@ -211,9 +214,8 @@ about 35,000 Drop-seq mouse testis cells. Its data is listed as GEO
 [GSE112393](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE112393), still to be
 checked for the counts and the cell-type labels the centroids need.
 
-Calls must mean the same thing in every section for Phase I. One fixed reference does most of
-that; the hand-made cluster calls follow one written rulebook (marker genes per type, the 70%
-threshold).
+Calls must mean the same thing in every section for Phase I. The same references and the same
+90% threshold in every section are what make them comparable.
 
 ### Sweeps for later
 
@@ -223,16 +225,15 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 |---|---|---|---|
 | Reference | Green and Shami, both run | Green's 32 types grouped to coarser levels | Agreement on the coarse types both have, once Green's types are grouped to Shami's 11 |
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
-| Genes | All genes the panel and reference share | Only each type's reference markers | Agreement with the all-gene calls; marker expression in the cells called |
+| Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
-| Purity threshold | 70% | 50% to 90% | How many clusters become Ambiguous, and whether their markers say they should be |
+| Purity threshold | 90% | 70% to 95% | How many clusters become Ambiguous, and whether their own markers set them apart |
 
 Normalization needs no sweep here: scaling or log-transforming a cell's counts keeps their
 ranks, so Spearman gives the same answer on any of them.
 
-Whatever the setting, a call is checked the same two ways: canonical markers should be
-expressed in the cells called that type, and the type should sit where it belongs in tissue,
-such as germ cells inside tubules and Leydig cells outside them.
+Whatever the setting, a call can be sanity-checked by where the type sits in tissue, such as
+germ cells inside tubules and Leydig cells outside them.
 
 ## Phase D — Identify tubules
 
