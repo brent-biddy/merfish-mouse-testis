@@ -28,32 +28,45 @@ sample of the whole cycle, spread across its tubules.
 Because expression is measured in every cell in place, a section can be read at all of
 these levels at once. For a section, the analysis:
 
-1. **Identifies every cell** by its expression: which somatic or germ cell type it is (Phases A
-   to C).
+1. **Identifies every cell** by its expression: which somatic or germ cell type it is (Phases B
+   to D).
 2. **Finds the tubules,** places each cell inside or outside one, and orders the cells within a
    tubule from the basement membrane to the lumen, which should recover the germ cells'
-   developmental order (Phases D and E).
-3. **Stages each tubule** from the germ cells it contains (Phase F).
+   developmental order (Phases E and F).
+3. **Stages each tubule** from the germ cells it contains (Phase G).
 4. **Asks how the tubule changes through the cycle:** which cell types are present at each stage,
    how their gene expression shifts, and how Sertoli and germ cells signal to each other
-   (Phase G).
+   (Phase H).
 5. **Asks how the interstitium relates to the tubule beside it:** where Leydig cells and
    macrophages sit, and whether their neighbourhood or their signalling across the basement
-   membrane follows that tubule's stage (Phase H).
+   membrane follows that tubule's stage (Phase I).
 
 Repeated over sections from young and old animals, the same measurements show how ageing
-changes the cycle, the tubule and the interstitium (Phase I).
+changes the cycle, the tubule and the interstitium (Phase J).
 
 Each phase that is decided lists its steps in order, and what each one decides. `NOTEBOOK.md`
 is how the notebook that runs them is built, with the code and the column names for each step.
 
-## Phase A — Segmentation and data QC
+## Phase A — Build the stores
+
+**Scope:** Per section.
+
+Each section's raw output and cellpose segmentation are turned into a SpatialData store (images,
+transcripts and cell boundaries) and a table beside it (counts and per-cell metadata). This is
+the pipeline's steps 1a and 1b, run before the notebook; `CLAUDE.md` has the detail. Every later
+phase reads the table, and the store only to draw tissue.
+
+A section is ready for Phase B once its table names the shapes in its store. Two sections need
+extra care: c1r1's segmentation raster is cropped, and a1r0 holds two tissue sections in one
+region, so it is split first.
+
+## Phase B — Segmentation and data QC
 
 **Scope:** Per section.
 
 **Minimal.** The segmentations already run are accepted as they are. This phase only looks: a few
 plots per section, so a bad region or an odd distribution is seen before clustering. Nothing is
-filtered here; the only cut is Phase B's low count cut.
+filtered here; the only cut is Phase C's low count cut.
 
 ### Plots
 
@@ -72,7 +85,7 @@ applies to the segmentation as it stands; none means re-segmenting.
 | QC check | Default | Could try | How to judge it |
 |---|---|---|---|
 | Cell volume | No cut | Drop the smallest and largest cells, by fixed volumes or quantiles | Whether small cells are fragments (few genes, no clear type) and large ones merges (markers of mutually exclusive types) |
-| Genes per cell | No cut | A minimum, alongside Phase B's count cut | Whether the cells it drops cluster together or are scattered through every type |
+| Genes per cell | No cut | A minimum, alongside Phase C's count cut | Whether the cells it drops cluster together or are scattered through every type |
 | Blank codewords per cell | No cut | A maximum share of a cell's counts | Blanks against real genes per section; whether high-blank cells sit in one area of tissue |
 | Transcripts assigned to a cell | Not checked | A minimum share per section or per FOV | Share per FOV drawn on tissue; a low area points at a segmentation or imaging fault |
 | Cells with no polygon | Kept | Dropped | How many there are; whether their calls differ from cells with one |
@@ -82,13 +95,13 @@ applies to the segmentation as it stands; none means re-segmenting.
 | Outlier sections | All kept | Flag a section whose metrics sit apart from the rest | The metrics compared across sections, pooled |
 
 Every row is judged by the same two questions: are the cells it removes worse than the rest,
-and does removing them change the clusters or the Phase C calls.
+and does removing them change the clusters or the Phase D calls.
 
-## Phase B — Filtering and clustering
+## Phase C — Filtering and clustering
 
 **Scope:** Per section, with one default recipe for every section.
 
-**The priority is to reach cell-type annotations (Phase C),** so Phases B and C run on defaults,
+**The priority is to reach cell-type annotations (Phase D),** so Phases C and D run on defaults,
 untuned. Where a sweep could improve them, and how to judge it, is noted at the end of each
 phase and left for later.
 
@@ -116,7 +129,7 @@ phase and left for later.
      spatially coherent.
 
 The same recipe, steps 3 to 8, is used again when a single cell type is subclustered in
-Phase C step 9, restarted from its raw counts rather than reusing the section-wide result.
+Phase D step 9, restarted from its raw counts rather than reusing the section-wide result.
 
 1.0 may turn out too coarse once annotation narrows down to finer types: germ cells are a
 continuous trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether
@@ -133,18 +146,18 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 | Normalization | Section median, then log1p | CP10K; dividing by cell volume | Whether clusters still track cell size or transcript count rather than type |
 | PCs | 30 | 20 to 50 | Variance explained per PC; how much the clusters change |
 | Neighbours | k = 15 | 10 to 50 | How much the clusters change |
-| Resolution | 0.5, 1.0, 1.5, 2.0; 1.0 annotated | 0.1 to 2.0 in steps of 0.1 | Agreement between neighbouring resolutions (adjusted Rand index); whether a split gives clusters with distinct markers; how pure each cluster's Phase C calls are |
+| Resolution | 0.5, 1.0, 1.5, 2.0; 1.0 annotated | 0.1 to 2.0 in steps of 0.1 | Agreement between neighbouring resolutions (adjusted Rand index); whether a split gives clusters with distinct markers; how pure each cluster's Phase D calls are |
 | Seed | 0 | Several | Agreement across seeds at the chosen resolution |
 
-Two checks apply to most rows: how stable the clusters are, and how cleanly Phase C can name them.
+Two checks apply to most rows: how stable the clusters are, and how cleanly Phase D can name them.
 A cluster that only appears at one setting, or that no reference type takes, is the thing to
 look for. Whether thresholds and resolution end up fixed for the cohort or set per section is
 decided by the same sweeps.
 
-## Phase C — Cell-type annotation
+## Phase D — Cell-type annotation
 
 **Scope:** Per section, with the same reference and the same purity threshold for the whole
-cohort, which is what makes calls comparable across sections for Phase I.
+cohort, which is what makes calls comparable across sections for Phase J.
 
 Every cell is correlated against a reference, and each cluster is then named from the mix of
 its cells' calls alone.
@@ -180,12 +193,12 @@ its cells' calls alone.
    per cluster. One rule for what counts as enough evidence applies to every section, so manual
    calls mean the same thing across the cohort. A cluster that stays unresolved keeps
    Ambiguous, and its cells are excluded at the major level. Every later phase drops excluded
-   cells. The excluded share per section is reported, and compared across sections in Phase I.
+   cells. The excluded share per section is reported, and compared across sections in Phase J.
    - Plot: the calls drawn on tissue, to check where each type sits, such as germ cells inside
      tubules and Leydig cells outside them.
    - Plot: a bar chart of cells per call and of how many were excluded.
 9. **Subcluster the types that have a finer reference.** Once the major types are settled, take
-   the cells of one major type and run the Phase B recipe on them again, then annotate the
+   the cells of one major type and run the Phase C recipe on them again, then annotate the
    subclusters against that type's finer reference by steps 3 to 8: the same correlation, the
    same composition rule, and the same by-hand resolution, recorded the same way. Which types
    have a finer reference:
@@ -210,7 +223,7 @@ reference's annotation is kept, so that comparison needs no rerun.
 | Reference | Species | Cell types | Values | Use |
 |---|---|---|---|---|
 | Green et al. 2018, 11 major types | Mouse | InnateLymph, Macrophage, Endothelial, Myoid, Leydig, Sertoli, Unknown (Tcf21+), SPG, Scytes, STids, Elongating | ln(mean TP10K + 1), rebuilt from the published counts and labels | **The first runs.** |
-| Green et al. 2018, germ-cell clusters | Mouse | GC1-GC12 | ln(mean TP10K + 1), as published | Narrowing down germ cells (C9), for staging |
+| Green et al. 2018, germ-cell clusters | Mouse | GC1-GC12 | ln(mean TP10K + 1), as published | Narrowing down germ cells (D9), for staging |
 | Shami et al. | Human | 11 major types | ln(mean + 1) | The alternative |
 
 Green et al. 2018, *A Comprehensive Roadmap of Murine Spermatogenesis Defined by Single-Cell
@@ -234,13 +247,13 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 Whatever the setting, a call can be sanity-checked by where the type sits in tissue, such as
 germ cells inside tubules and Leydig cells outside them.
 
-## Phases D to I
+## Phases E to J
 
-These are an outline. Phases A to C are decided; D to I are planned in detail once the major-type
+These are an outline. Phases A to D are decided; E to J are planned in detail once the major-type
 annotation is running. Every one of them reads each cell's fine cell type and drops excluded
 cells.
 
-## Phase D — Identify tubules
+## Phase E — Identify tubules
 
 **Scope:** Per section.
 
@@ -258,7 +271,7 @@ a polygon.
 Per-cell results are stored with the cells; tubule polygons are not per cell, so they are
 stored separately.
 
-## Phase E — Radial layering
+## Phase F — Radial layering
 
 **Scope:** Per section.
 
@@ -266,10 +279,10 @@ Each cell in a tubule gets a radial position: 0 at the basement membrane, 1 at t
 
 - Expected order, outside in: spermatogonia and Sertoli nuclei, spermatocytes, round
   spermatids, elongating spermatids.
-- Checks Phases C and D together; a wrong order points at one of them.
+- Checks Phases D and E together; a wrong order points at one of them.
 - Gene expression along the radial axis, within each cell type.
 
-## Phase F — Stage the tubules
+## Phase G — Stage the tubules
 
 **Scope:** Per section. Could also be pooled: ordering tubules around the cycle may be steadier
 with every section's tubules together than with one section's alone.
@@ -284,7 +297,7 @@ which germ cells occur together.
   the germ-cell composition of each tubule, and does not read a stage from them directly.
 - Realistic target: stage groups (I-III, IV-VI, VII-VIII, IX-XII) rather than all twelve.
 
-## Phase G — Within the tubule, by stage
+## Phase H — Within the tubule, by stage
 
 **Scope:** Per section.
 
@@ -292,7 +305,7 @@ which germ cells occur together.
 - Gene expression across the cycle per cell type, as pseudobulk per tubule ordered by stage
 - Sertoli-germ cell signalling by stage, from ligand-receptor pairs on the 491-gene panel
 
-## Phase H — Extratubular cells and the tubule
+## Phase I — Extratubular cells and the tubule
 
 **Scope:** Per section.
 
@@ -302,7 +315,7 @@ which germ cells occur together.
 - Whether the interstitium beside a tubule changes with that tubule's stage
 - Ligand-receptor signalling across the basement membrane
 
-## Phase I — Young vs old
+## Phase J — Young vs old
 
 **Scope:** Over the cohort, sections grouped by animal and animals by age.
 
@@ -323,5 +336,5 @@ anything compared across sections starts from counts.
       d2, 2a, 2b prefixes mark animals?)
 - [ ] Green SPG and Sertoli subtypes: the collaborator's file has them, but they are not in the public data. Use them, and if so, where did they come from?
 - [ ] Which image channels exist for tubule segmentation?
-- [ ] Has the collaborator staged any of these sections? That would be a ready validation set for Phase F.
+- [ ] Has the collaborator staged any of these sections? That would be a ready validation set for Phase G.
 - [ ] Which ligand-receptor pairs the panel covers
