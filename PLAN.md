@@ -55,8 +55,12 @@ The report's existing QC section stays as a first look. Ideas for when this is p
 
 **Scope:** Per section, with one default recipe for every section.
 
+**The priority is to reach cell-type annotations (A3).** A2 and A3 run on defaults, untuned,
+so the analysis can move on to the tubule phases. Where a sweep could improve them, and how to
+judge it, is noted at the end of each section and left for later.
+
 The notebook starts from the recipe step 2 (`bin/cluster_spatialdata_gpu.py`) uses, as a
-default for every section, read at resolution 1.0; the parameters are not tuned yet.
+default for every section, read at resolution 1.0.
 
 | Stage | Default |
 |---|---|
@@ -86,20 +90,35 @@ Still to do now:
 
 - Add top marker genes per cluster; the report does not show them yet.
 
-Later, once the default has been carried through the rest of the analysis:
+### Sweeps for later
 
-- Sweep the filter thresholds and the clustering parameters (PCs, neighbours, resolution) and
-  evaluate the choices, by stability across the sweep and by how cleanly markers separate
-- Decide whether thresholds and resolution are fixed for the cohort or set per section
+Not now. Where the defaults could be swept, and what would show a choice is better:
+
+| Parameter | Default | Could try | How to judge it |
+|---|---|---|---|
+| Low count cut | 20 transcripts | 10 to 50 | Whether any cluster is mostly low-count cells; whether the dropped cells map to one area of tissue or are scattered |
+| High count cut | Off | Top 0.5% or 1% | Whether the cells it removes co-express markers of mutually exclusive types, as doublets and merged cells would |
+| Other cell filters | None | Cell volume, genes per cell | The same checks as the count cuts |
+| Normalization | Section median, then log1p | CP10K; dividing by cell volume | Whether clusters still track cell size or transcript count rather than type |
+| PCs | 30 | 20 to 50 | Variance explained per PC; how much the clusters change |
+| Neighbours | k = 15 | 10 to 50 | How much the clusters change |
+| Resolution | 1.0 | 0.1 to 2.0, already written | Agreement between neighbouring resolutions (adjusted Rand index); whether a split gives clusters with distinct markers; how pure each cluster's A3 calls are |
+| Seed | 0 | Several | Agreement across seeds at the chosen resolution |
+
+Two checks apply to most rows: how stable the clusters are, and how cleanly A3 can name them.
+A cluster that only appears at one setting, or that no reference type takes, is the thing to
+look for. Whether thresholds and resolution end up fixed for the cohort or set per section is
+decided by the same sweeps.
 
 ## Phase A3 — Cell-type annotation
 
 **Scope:** Per section, against one reference and one rulebook fixed for the whole cohort.
 
 Every cell is correlated against a reference, and each cluster is then named by a person from
-the mix of its cells' calls. Step 3 makes no cluster-level call itself.
+the mix of its cells' calls. The notebook follows step 3's method (`bin/annotate_celltypes.py`),
+on defaults, which makes no cluster-level call itself.
 
-1. **Per-cell correlation (step 3, `bin/annotate_celltypes.py`).** Spearman correlation of each
+1. **Per-cell correlation.** Spearman correlation of each
    cell's raw counts against every reference cell type, over the genes the panel and reference
    share. Genes match case-insensitively, so mouse `Acta2` finds human `ACTA2`; the matched genes
    are written to `<sample>.gene_overlap.tsv`.
@@ -125,6 +144,25 @@ Spearman, which uses only ranks, so the scale matters less but still needs confi
 Calls must mean the same thing in every section for Phase G. One fixed reference does most of
 that; the hand-made cluster calls follow one written rulebook (marker genes per type, the 70%
 threshold).
+
+### Sweeps for later
+
+Not now. Where the defaults could be swept, and what would show a choice is better:
+
+| Parameter | Default | Could try | How to judge it |
+|---|---|---|---|
+| Reference | Green (mouse) | Shami (human) | Agreement on the coarse types both have, once Green's 32 types are grouped to Shami's 11 |
+| Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
+| Genes | All genes the panel and reference share | Only each type's reference markers | Agreement with the all-gene calls; marker expression in the cells called |
+| Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
+| Purity threshold | 70% | 50% to 90% | How many clusters become Ambiguous, and whether their markers say they should be |
+
+Normalization needs no sweep here: scaling or log-transforming a cell's counts keeps their
+ranks, so Spearman gives the same answer on any of them.
+
+Whatever the setting, a call is checked the same two ways: canonical markers should be
+expressed in the cells called that type, and the type should sit where it belongs in tissue,
+such as germ cells inside tubules and Leydig cells outside them.
 
 ## Phase B — Identify tubules
 
