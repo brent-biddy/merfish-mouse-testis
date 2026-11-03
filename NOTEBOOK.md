@@ -8,7 +8,7 @@ recipe is the earlier pipeline's, carried over, on scanpy (`sc`).
 The analysis is one self-contained Quarto notebook, run once per section. It calls no `bin/`
 scripts: everything from building the reference to the cluster calls is code in the notebook,
 built up a section at a time in the order of `PLAN.md`'s steps. A step is named by phase and
-number, C3 or D5. Its input is the store and table Phase A (pipeline steps 1a and 1b) already
+number, B1 or D5. Its input is the store and table Phase A (pipeline steps 1a and 1b) already
 built for the section.
 
 It is worked out end to end on one section, b2r0, before it runs on the other 15: every phase
@@ -18,7 +18,7 @@ the same way. `NOTES.md` tracks where the runs stand.
 
 ## One object
 
-**One object passes through the whole notebook.** Step C1 loads the section's table as a
+**One object passes through the whole notebook.** Step B1 loads the section's table as a
 single AnnData, and every later section adds to that same object rather than making a new one:
 raw counts kept in `layers["counts"]` and log-normalized values in `layers["lognorm"]`, since
 normalization and scaling overwrite `X`, embeddings in
@@ -59,24 +59,24 @@ each other.
 | Checkpoint | After | Key holds |
 |---|---|---|
 | Reference | D0 | The reference and its level; no sample, so every section shares it |
-| 1, clustered | C8 | The section, the filter, normalization, PCA, neighbour and Leiden settings, and the backend |
+| 1, clustered | C7 | The section, the filter, normalization, PCA, neighbour and Leiden settings, and the backend |
 | 2, annotated | D8 | Checkpoint 1's key, the resolution, the reference and the purity threshold |
 
-Changing anything in Phase C reruns C2 to C8 and invalidates checkpoint 2 with it, since
+Changing anything in Phase C reruns C1 to C7 and invalidates checkpoint 2 with it, since
 checkpoint 2's key includes checkpoint 1's. Changing anything in Phase D reruns only D1 to D8
 from checkpoint 1, so annotation is iterated on without reclustering, and a run with each
 reference leaves its own checkpoint 2 side by side. Checkpoint 2 is the whole object, so the
 later phases read whichever columns they need from it.
 
-A checkpoint after C3 could be added so that changing PCA, neighbours or Leiden does not redo
+A checkpoint after C2 could be added so that changing PCA, neighbours or Leiden does not redo
 filtering and normalization. Not needed yet; add it if clustering b2r0 turns out slow.
 
 ## One clustering function, two levels
 
-Steps C3 to C8 are one function, `cluster_cells(adata)`, and the same function reclusters a
+Steps C2 to C7 are one function, `cluster_cells(adata)`, and the same function reclusters a
 single cell type's cells in D9. Nothing is reused between levels: the subset starts again from
 its raw counts layer and runs the same normalize, scale, PCA, neighbours, UMAP and Leiden calls
-with the same parameters. Only the filter (C2) is skipped, since those cells already passed it.
+with the same parameters. Only the filter (C1) is skipped, since those cells already passed it.
 
 - Normalization means the subset's own median total, so log-normalized values are on a
   different scale at each level. Anything compared across levels starts from counts.
@@ -94,14 +94,14 @@ pipeline's, carried over.
 
 | Step | Code |
 |---|---|
-| C1 | `adata = anndata.read_h5ad(table_path)`; `adata.layers["counts"] = adata.X.copy()` |
-| C2 | `sc.pp.filter_cells(adata, min_counts=20)`. The high cut's threshold is `adata.obs["transcript_count"].quantile(q)`, taken before the low cut, then `sc.pp.filter_cells(adata, max_counts=threshold)` |
-| C3 | `sc.pp.normalize_total(adata)`, `sc.pp.log1p(adata)`; then `adata.layers["lognorm"] = adata.X.copy()` |
-| C4 | `sc.pp.scale(adata, zero_center=False, max_value=10)` |
-| C5 | `sc.pp.pca(adata, n_comps=30, random_state=0)` |
-| C6 | `sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)` |
-| C7 | `sc.tl.umap(adata, random_state=0)` |
-| C8 | For each resolution `r`: `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph", n_iterations=2, random_state=0)`, then our own `relabel_by_size()` renumbers the clusters 1..k by size |
+| B1 | `adata = anndata.read_h5ad(TABLE)`, where `TABLE` is the one `*.create_spatialdata_cellpose.h5ad` staged beside the notebook; `adata.layers["counts"] = adata.X.copy()`; then `adata.obs["transcript_count"] = np.asarray(adata.layers["counts"].sum(axis=1)).ravel()` and `adata.obs["gene_count"] = np.asarray((adata.layers["counts"] > 0).sum(axis=1)).ravel()`. The table has neither column, so B1 derives both. They cover the 491 real genes only: blank codewords are in `obsm["blank"]`, not in `X`, and are left out. The sample id is read from `adata.obs["sample"]`, not from the file name. Phase B's plots and C1's high cut read `transcript_count` |
+| C1 | `sc.pp.filter_cells(adata, min_counts=20)`. The high cut's threshold is `adata.obs["transcript_count"].quantile(q)`, taken before the low cut, then `sc.pp.filter_cells(adata, max_counts=threshold)` |
+| C2 | `sc.pp.normalize_total(adata)`, `sc.pp.log1p(adata)`; then `adata.layers["lognorm"] = adata.X.copy()` |
+| C3 | `sc.pp.scale(adata, zero_center=False, max_value=10)` |
+| C4 | `sc.pp.pca(adata, n_comps=30, random_state=0)` |
+| C5 | `sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)` |
+| C6 | `sc.tl.umap(adata, random_state=0)` |
+| C7 | For each resolution `r`: `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph", n_iterations=2, random_state=0)`, then our own `relabel_by_size()` renumbers the clusters 1..k by size |
 
 **Phase D**
 

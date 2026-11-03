@@ -68,12 +68,19 @@ region, so it is split first.
 plots per section, so a bad region or an odd distribution is seen before clustering. Nothing is
 filtered here; the only cut is Phase C's low count cut.
 
-### Plots
+### Steps
 
-1. **Transcripts per cell and genes per cell,** as histograms.
-2. **Cell volume,** as a histogram.
-3. **Blank codewords against real genes,** as the share of each cell's counts that are blanks.
-4. **Transcript count drawn on tissue,** to show FOV seams, edges and damaged areas at a glance.
+1. **Load the section's table,** keeping the raw counts, and count each cell's transcripts over
+   the real genes. Blank codewords are not counted.
+2. **Transcripts per cell and genes per cell,** as histograms.
+3. **Cell volume,** as a histogram.
+4. **Blank codewords against real genes,** in two panels: each codeword's total counts across the
+   section, blanks beside the real genes, to show how far the genes sit above the noise floor; and
+   the number of blank counts each cell collects.
+5. **Transcript count drawn on tissue,** to show FOV seams, edges and damaged areas at a glance. The
+   mean transcripts per cell along x and along y is drawn at the map's margins, and the imaging
+   fields of view are marked on all three, so a dip can be matched to a field-of-view boundary or
+   told apart from a smooth fall towards the tissue's edge.
 
 Anything that looks wrong is noted for the sweeps below, not acted on in this phase.
 
@@ -86,7 +93,7 @@ applies to the segmentation as it stands; none means re-segmenting.
 |---|---|---|---|
 | Cell volume | No cut | Drop the smallest and largest cells, by fixed volumes or quantiles | Whether small cells are fragments (few genes, no clear type) and large ones merges (markers of mutually exclusive types) |
 | Genes per cell | No cut | A minimum, alongside Phase C's count cut | Whether the cells it drops cluster together or are scattered through every type |
-| Blank codewords per cell | No cut | A maximum share of a cell's counts | Blanks against real genes per section; whether high-blank cells sit in one area of tissue |
+| Blank codewords per cell | No cut | A maximum share of a cell's counts | The blank counts per cell from Phase B step 4; whether high-blank cells sit in one area of tissue, from the step 5 map |
 | Transcripts assigned to a cell | Not checked | A minimum share per section or per FOV | Share per FOV drawn on tissue; a low area points at a segmentation or imaging fault |
 | Cells with no polygon | Kept | Dropped | How many there are; whether their calls differ from cells with one |
 | Boundary plane | Every plane kept | Drop cells whose boundary is on the top or bottom plane | Whether those cells have fewer counts or different calls |
@@ -107,28 +114,27 @@ phase and left for later.
 
 ### Steps
 
-1. **Load the section's table,** keeping the raw counts alongside the normalized values.
-2. **Filter cells.** Drop cells under 20 transcripts. The high cut, for doublets and merged
+1. **Filter cells.** Drop cells under 20 transcripts. The high cut, for doublets and merged
    cells, is off; if turned on it is a quantile of transcript count, taken before the low cut.
    All 491 genes are kept: no highly-variable selection and no gene filter, since the panel is
    already curated.
-3. **Normalize.** Scale every cell to the section's median total, then log. Keep the
+2. **Normalize.** Scale every cell to the section's median total, then log. Keep the
    log-normalized values for markers.
-4. **Scale.** Unit variance, not centred, clipped at 10.
-5. **PCA,** 30 components.
+3. **Scale.** Unit variance, not centred, clipped at 10.
+4. **PCA,** 30 components.
    - Plot: variance explained per component, to show 30 PCs are enough.
-6. **Neighbour graph,** 15 neighbours, cosine distance.
-7. **UMAP.**
+5. **Neighbour graph,** 15 neighbours, cosine distance.
+6. **UMAP.**
    - Plot: UMAP coloured by transcript count, to show whether structure tracks depth rather
      than type.
-8. **Leiden at 0.5, 1.0, 1.5 and 2.0.** Each resolution's clusters are renumbered 1..k by size,
+7. **Leiden at 0.5, 1.0, 1.5 and 2.0.** Each resolution's clusters are renumbered 1..k by size,
    so cluster 1 is the largest. Every call and figure names a cluster by that number.
    - Plot: UMAP coloured by cluster, one panel per resolution.
    - Plot: cells per cluster at each resolution.
    - Plot: the clusters drawn on tissue at the resolution annotated, to show whether they are
      spatially coherent.
 
-The same recipe, steps 3 to 8, is used again when a single cell type is subclustered in
+The same recipe, steps 2 to 7, is used again when a single cell type is subclustered in
 Phase D step 9, restarted from its raw counts rather than reusing the section-wide result.
 
 1.0 may turn out too coarse once annotation narrows down to finer types: germ cells are a

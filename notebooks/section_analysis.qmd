@@ -1,0 +1,274 @@
+---
+title: "MERFISH testis — per-section analysis"
+subtitle: "Phase B: segmentation and data QC"
+author: "Brent Biddy"
+date: today
+format:
+  gfm:
+    fig-dpi: 144
+    toc: true
+    toc-depth: 2
+    filters:
+      - fold-code.lua      # code folding, which quarto only does for HTML
+execute:
+  warning: false
+---
+
+```{python}
+# | tags: [setup]
+from pathlib import Path
+
+import anndata as ad
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Rectangle
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+# Phase C's low count cut. Phase B draws it as a marker so the plots show what it would
+# remove; nothing is filtered here.
+LOW_COUNT_CUT = 20
+
+# What the workflow staged beside the notebook, told apart by file name suffix. The trailing
+# comma raises unless exactly one matches.
+(TABLE,) = Path(".").glob("*.create_spatialdata_cellpose.h5ad")
+(FOV_EXTENTS,) = Path(".").glob("*.fov_extents.csv")
+```
+
+```{python}
+# | tags: [helpers]
+# Plotting only: every function here takes already-computed data and draws a figure.
+# No AnnData indexing, aggregation or column derivation happens in this cell.
+
+
+def plot_counts_per_cell(transcripts, genes, medians, low_cut, share_below_cut):
+    """B2: transcripts per cell and genes per cell, as histograms over the full range."""
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.4), constrained_layout=True)
+    panels = [
+        (transcripts, "Transcripts per cell", "transcripts", 8, True),
+        (genes, "Genes per cell", "genes", 2, False),
+    ]
+    for ax, (x, title, name, width, mark_cut) in zip(axes, panels):
+        # Integer-aligned bins: each holds the same number of whole counts, so there is
+        # no comb pattern.
+        ax.hist(x, bins=np.arange(-0.5, x.max() + width, width), color="0.35")
+        ax.axvline(medians[name], color="tab:blue", lw=1.2, label=f"median {medians[name]:.0f}")
+        if mark_cut:
+            ax.axvline(
+                low_cut,
+                color="tab:red",
+                lw=1.2,
+                ls="--",
+                label=f"Phase C cut ({low_cut}): {share_below_cut:.1%} of cells",
+            )
+        ax.set(title=title, xlabel=f"{name} per cell", ylabel="cells")
+        ax.legend(frameon=False, fontsize=8)
+    return fig
+
+
+def plot_cell_volume(volume, median, bin_width=20):
+    """B3: cell volume, as a histogram over the full range."""
+    fig, ax = plt.subplots(figsize=(4.8, 3.4), constrained_layout=True)
+    ax.hist(volume, bins=np.arange(0, volume.max() + bin_width, bin_width), color="0.35")
+    ax.axvline(median, color="tab:blue", lw=1.2, label=f"median {median:.0f} µm³")
+    ax.set(title="Cell volume", xlabel="volume (µm³)", ylabel="cells")
+    ax.legend(frameon=False, fontsize=8)
+    return fig
+
+
+def plot_blank_codewords(gene_totals, blank_totals, cells_per_blank_count):
+    """B4: blank codewords against real genes, per codeword and per cell."""
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.4), constrained_layout=True)
+    rng = np.random.default_rng(0)
+
+    # Left: one dot per codeword, jittered sideways, with each group's median.
+    ax = axes[0]
+    groups = [(gene_totals, "0.35", "real genes"), (blank_totals, "tab:red", "blank codewords")]
+    for x_, (totals, color, name) in enumerate(groups):
+        ax.scatter(x_ + rng.uniform(-0.3, 0.3, len(totals)), totals, s=6, color=color, alpha=0.7, linewidths=0)
+        ax.hlines(np.median(totals), x_ - 0.38, x_ + 0.38, color="tab:blue", lw=1.5)
+    ax.set_yscale("log")
+    ax.set_xticks([0, 1], [f"real genes (n={len(gene_totals)})", f"blank codewords (n={len(blank_totals)})"])
+    ax.set(title="Total counts per codeword", ylabel="counts across the section (log)", xlim=(-0.6, 1.6))
+
+    # Right: how many cells have 0, 1, 2, ... blank counts; the first few are labelled.
+    ax = axes[1]
+    k = np.arange(len(cells_per_blank_count))
+    ax.bar(k, cells_per_blank_count, width=0.9, color="0.35")
+    for x_ in k[:4]:
+        ax.text(x_, cells_per_blank_count[x_], f"{cells_per_blank_count[x_] / cells_per_blank_count.sum():.0%}",
+                ha="center", va="bottom", fontsize=7)
+    ax.set(title="Blank counts per cell", xlabel="blank counts in the cell", ylabel="cells")
+    return fig
+
+
+def plot_transcripts_on_tissue(xy, transcripts, vmax, x_profile, y_profile, fov_boxes, x_bounds, y_bounds):
+    """B5: transcript count drawn on tissue, with its mean along x and y at the margins.
+
+    fov_boxes is one row per field of view: x, y of its corner, then width and height.
+    x_bounds and y_bounds are where the field-of-view columns and rows start and end.
+    """
+    fig, ax = plt.subplots(figsize=(8, 7), constrained_layout=True)
+    pts = ax.scatter(xy[:, 0], xy[:, 1], c=transcripts, s=0.4, cmap="viridis", vmin=0, vmax=vmax,
+                     linewidths=0, rasterized=True)
+    ax.add_collection(PatchCollection([Rectangle((x, y), w, h) for x, y, w, h in fov_boxes],
+                                      facecolor="none", edgecolor="red", linewidth=0.3, alpha=0.5))
+    ax.set_aspect("equal")
+    ax.invert_yaxis()
+    ax.set(xlabel="x (µm)", ylabel="y (µm)")
+
+    divider = make_axes_locatable(ax)
+    ax_top = divider.append_axes("top", size="22%", pad=0.08, sharex=ax)
+    ax_right = divider.append_axes("right", size="22%", pad=0.08, sharey=ax)
+    cax = divider.append_axes("bottom", size="3%", pad=0.65)
+
+    ax_top.plot(*x_profile, color="0.2", lw=0.8)
+    for b in x_bounds:
+        ax_top.axvline(b, color="red", lw=0.4, alpha=0.4)
+    ax_top.set(ylabel="mean per cell")
+    ax_top.tick_params(labelbottom=False)
+    ax_top.set_title("Transcripts per cell on tissue")
+
+    ax_right.plot(y_profile[1], y_profile[0], color="0.2", lw=0.8)
+    for b in y_bounds:
+        ax_right.axhline(b, color="red", lw=0.4, alpha=0.4)
+    ax_right.set(xlabel="mean per cell")
+    ax_right.tick_params(labelleft=False)
+
+    fig.colorbar(pts, cax=cax, orientation="horizontal",
+                 label=f"transcripts per cell (colour clipped at the 99th percentile, {vmax:.0f})")
+    return fig
+```
+
+## B1. Load the section
+
+The table is Phase A's output: raw counts for the 491 panel genes in `X`, per-cell
+segmentation metadata in `obs`, and the blank codewords kept apart in `obsm["blank"]`. The
+raw counts are copied to a layer, because normalization later overwrites `X`. The table
+has neither a transcript count nor a gene count, so both are derived here, over the real
+genes only; blank codewords are not counted. `transcript_count` is a cell's total counts
+and `gene_count` is how many genes it has at least one count for.
+
+```{python}
+adata = ad.read_h5ad(TABLE)
+
+# The sample id comes from inside the object, never from the staged file name.
+assert adata.obs["sample"].nunique() == 1, "one table must hold exactly one sample"
+SAMPLE = str(adata.obs["sample"].iat[0])
+
+adata.layers["counts"] = adata.X.copy()
+adata.obs["transcript_count"] = np.asarray(adata.layers["counts"].sum(axis=1)).ravel()
+adata.obs["gene_count"] = np.asarray((adata.layers["counts"] > 0).sum(axis=1)).ravel()
+
+print(f"{SAMPLE}: {adata.n_obs:,} cells x {adata.n_vars} genes")
+```
+
+## B2. Transcripts and genes per cell
+
+How deeply each cell was read. The red line is Phase C's low count cut; it only marks what
+that cut would remove. The x-axis runs to each distribution's maximum, so the sparse high
+tail is on the plot.
+
+```{python}
+transcripts = adata.obs["transcript_count"]
+genes = adata.obs["gene_count"]
+
+medians = {"transcripts": np.median(transcripts), "genes": np.median(genes)}
+share_below_cut = (transcripts < LOW_COUNT_CUT).mean()
+
+plot_counts_per_cell(transcripts, genes, medians, LOW_COUNT_CUT, share_below_cut)
+plt.show()
+print(f"maximum: {transcripts.max():.0f} transcripts, {genes.max()} genes")
+```
+
+## B3. Cell volume
+
+How large the segmented cells are. A fragment would show as a cluster of very small cells,
+and a merge of two cells as a cluster of very large ones. `volume` is in cubic micrometres;
+the table's `volume_voxels` is the same measure in voxels, at 0.0175 µm³ per voxel. Nothing
+is cut on volume.
+
+```{python}
+volume = adata.obs["volume"]
+
+plot_cell_volume(volume, volume.median())
+plt.show()
+print(f"range: {volume.min():.1f} to {volume.max():.0f} µm³")
+```
+
+## B4. Blank codewords against real genes
+
+Blank codewords are probes that should never bind anything, so the counts they collect are
+the noise floor. The left panel puts each blank codeword beside each real gene by its total
+counts across the section, and shows how far the genes sit above the blanks and whether any
+single blank stands out. The right panel shows how many blank counts a single cell
+collects, which is how much stray signal one cell carries. Both are looked at, not cut on.
+
+```{python}
+blank = adata.obsm["blank"]
+
+gene_totals = np.asarray(adata.layers["counts"].sum(axis=0)).ravel()
+blank_totals = blank.sum(axis=0).to_numpy()
+blank_per_cell = blank.sum(axis=1).to_numpy()
+cells_per_blank_count = np.bincount(blank_per_cell.astype(int))
+
+plot_blank_codewords(gene_totals, blank_totals, cells_per_blank_count)
+plt.show()
+
+blank_share = blank_per_cell.sum() / (blank_per_cell.sum() + adata.obs["transcript_count"].sum())
+print(f"blank codewords are {blank_share:.2%} of all counts")
+print(
+    f"median codeword: {np.median(gene_totals):.0f} counts for real genes, "
+    f"{np.median(blank_totals):.0f} for blanks ({np.median(gene_totals) / np.median(blank_totals):.1f}x)"
+)
+for label, cut in [("median", np.median(blank_totals)), ("95th percentile", np.quantile(blank_totals, 0.95))]:
+    print(f"real genes below the blank {label} ({cut:.0f}): {(gene_totals < cut).sum()} of {len(gene_totals)}")
+```
+
+## B5. Transcript count on tissue
+
+Where in the section cells were read poorly. Each dot is a cell, coloured by its transcript
+count. The curves on the top and right edges are the mean transcripts per cell along x and
+along y, in 10 µm bins; they share the map's axes, so a dip sits directly over the part of the
+tissue it comes from. The red boxes are the imaging fields of view, and the red lines on the
+curves are where their columns and rows start and end. Where the mean dips on a line, cells
+along that field-of-view boundary were read less deeply; a wide, smooth fall towards the
+border of the tissue is a different thing, the edge. Nothing is cut on either.
+
+```{python}
+xy = np.asarray(adata.obsm["spatial"])
+transcripts = adata.obs["transcript_count"].to_numpy()
+
+
+def mean_by_bin(coord, values, width=10, min_cells=20):
+    """Mean of values in bins along one axis; bins with too few cells are left blank."""
+    edges = np.arange(coord.min(), coord.max() + width, width)
+    idx = np.clip(np.digitize(coord, edges) - 1, 0, len(edges) - 2)
+    n = np.bincount(idx, minlength=len(edges) - 1)
+    total = np.bincount(idx, weights=values, minlength=len(edges) - 1)
+    mean = np.divide(total, n, out=np.full(len(n), np.nan), where=n >= min_cells)
+    return edges[:-1] + width / 2, mean
+
+
+def column_starts(edge, gap=100):
+    """Where each column (or row) of fields of view starts: edges within `gap` µm are one."""
+    v = np.sort(edge.round(-1).unique())
+    return np.array([s for i, s in enumerate(v) if i == 0 or s - v[i - 1] > gap])
+
+
+fov = pd.read_csv(FOV_EXTENTS, index_col="fov")
+fov_boxes = np.column_stack([fov.x_min, fov.y_min, fov.x_max - fov.x_min, fov.y_max - fov.y_min])
+fov_size = float(np.median(fov.x_max - fov.x_min))
+x_starts, y_starts = column_starts(fov.x_min), column_starts(fov.y_min)
+x_bounds = np.sort(np.concatenate([x_starts, x_starts + fov_size]))
+y_bounds = np.sort(np.concatenate([y_starts, y_starts + fov_size]))
+
+plot_transcripts_on_tissue(
+    xy, transcripts, np.quantile(transcripts, 0.99),
+    mean_by_bin(xy[:, 0], transcripts), mean_by_bin(xy[:, 1], transcripts),
+    fov_boxes, x_bounds, y_bounds,
+)
+plt.show()
+print(f"{len(fov)} fields of view, about {fov_size:.0f} µm square")
+```
