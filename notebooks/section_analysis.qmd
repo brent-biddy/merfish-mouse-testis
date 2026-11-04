@@ -1,6 +1,6 @@
 ---
 title: "MERFISH testis — per-section analysis"
-subtitle: "Phases B and C: data QC, filtering and clustering"
+subtitle: "Phases B to D: data QC, clustering and cell-type annotation"
 author: "Brent Biddy"
 date: today
 format:
@@ -16,6 +16,7 @@ execute:
 
 ```{python}
 # | tags: [setup]
+import os
 from pathlib import Path
 
 import anndata as ad
@@ -24,6 +25,7 @@ import scanpy as sc
 import numpy as np
 import pandas as pd
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from scipy.stats import rankdata
 
 # Phase C's low count cut. Phase B draws it as a marker so the plots show what it would
 # remove; nothing is filtered here.
@@ -33,6 +35,24 @@ LOW_COUNT_CUT = 20
 # annotates is decided there, on how pure each resolution's clusters are; all four are kept.
 RESOLUTIONS = [0.5, 1.0, 1.5, 2.0]
 ANNOTATED_RESOLUTION = 1.0
+
+# Phase D: the reference's cell types, germ first, and the colours the figures draw them in.
+GERM = ["SPG", "Scytes", "STids", "Elongating"]
+SOMATIC = ["Sertoli", "Leydig", "Myoid", "Endothelial", "Macrophage", "InnateLymph", "Unknown"]
+CELL_TYPES = GERM + SOMATIC
+TYPE_COLORS = {
+    "SPG": "#1f77b4", "Scytes": "#2ca02c", "STids": "#ff7f0e", "Elongating": "#d62728",
+    "Sertoli": "#9467bd", "Leydig": "#000000", "Myoid": "#e377c2", "Endothelial": "#17becf",
+    "Macrophage": "#8c564b", "InnateLymph": "#bcbd22", "Unknown": "#7f7f7f",
+}
+GROUP_COLORS = {"germ": "#d98c1f", "somatic": "#4a7fb5"}
+
+# The repository root, where the reference data and its cache live. A render outside the
+# repository sets MERFISH_REPO.
+_start = Path(os.environ["MERFISH_REPO"]) if "MERFISH_REPO" in os.environ else Path.cwd()
+REPO = next(p for p in [_start, *_start.parents] if (p / "PLAN.md").exists())
+GEO_DIR = REPO / "data/reference/green2018"
+REFERENCE_DIR = REPO / "results/section_analysis/reference"
 
 # What the workflow staged beside the notebook, told apart by file name suffix. The trailing
 # comma raises unless exactly one matches.
@@ -200,6 +220,38 @@ def plot_clusters_on_tissue(xy, labels, resolution, sample):
     ax.set_aspect("equal")
     ax.invert_yaxis()
     ax.set(title=f"{sample}: Leiden {resolution} on tissue", xlabel="x (µm)", ylabel="y (µm)")
+    return fig
+
+
+def plot_shared_genes(n_panel, n_shared):
+    """D3: how many of the panel's genes the reference has."""
+    fig, ax = plt.subplots(figsize=(4.8, 2.4), constrained_layout=True)
+    ax.barh(["panel genes", "shared with\nthe reference"], [n_panel, n_shared], color=["0.65", "0.3"])
+    for y, n in enumerate([n_panel, n_shared]):
+        ax.text(n, y, f" {n}", va="center")
+    ax.set(xlim=(0, n_panel * 1.12), xlabel="genes")
+    ax.invert_yaxis()
+    return fig
+
+
+def plot_calls(umap, xy, calls, colors, sample, what, last=()):
+    """D5: a per-cell label on the UMAP and on the tissue. Labels in `last` are drawn on top."""
+    calls = np.asarray(calls)
+    on_top = np.isin(calls, list(last))
+    order = np.r_[np.random.default_rng(0).permutation(np.flatnonzero(~on_top)), np.flatnonzero(on_top)]
+    point_colors = np.array([colors[k] for k in calls])
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6.5), constrained_layout=True)
+    axes[0].scatter(umap[order, 0], umap[order, 1], c=point_colors[order], s=0.3, linewidths=0, rasterized=True)
+    axes[0].set(title=f"{sample}: {what} on UMAP", xticks=[], yticks=[])
+    axes[1].scatter(xy[order, 0], xy[order, 1], c=point_colors[order], s=0.5, linewidths=0, rasterized=True)
+    axes[1].set_aspect("equal")
+    axes[1].invert_yaxis()
+    axes[1].set(title=f"{sample}: {what} on tissue", xlabel="x (µm)", ylabel="y (µm)")
+    for label, color in colors.items():
+        if (calls == label).any():
+            axes[1].scatter([], [], c=color, s=25, label=f"{label} ({(calls == label).sum():,})")
+    axes[1].legend(frameon=False, fontsize=8, loc="upper left", bbox_to_anchor=(1, 1))
     return fig
 ```
 
@@ -455,4 +507,150 @@ plot_clusters_on_tissue(
     ANNOTATED_RESOLUTION, SAMPLE,
 )
 plt.show()
+```
+
+
+# Phase D — Cell-type annotation
+
+Every cell is correlated against a reference and takes the type it correlates with most. The
+first pass stops at germ or somatic: a cell is germ when that type is one of the four germ
+types, and somatic otherwise. Nothing is named at the cluster level. Clusters here are for
+looking at the data, and naming them from the mix of their cells' calls is deferred until
+something needs it (D1, D2 and D6 to D8 in `PLAN.md`). Germ stage is left to a later recluster
+of the germ cells alone.
+
+## D0. The reference
+
+Green et al. 2018's 11 major cell types, as the mean expression per type over the panel genes:
+ln(mean TP10K + 1), rebuilt from the published counts and per-cell labels. Building it reads an
+81 MB count table of 37,241 genes by 34,633 cells in chunks, which takes a few minutes, so the
+result is cached once for every section and loaded by the rest.
+
+A panel gene renamed since the reference was made is looked up under the name the reference
+uses rather than dropped. `Catspere1` is in neither name and is left out.
+
+```{python}
+CELL_TYPE_CODES = {1: "InnateLymph", 2: "Macrophage", 3: "Endothelial", 4: "Myoid", 5: "Leydig",
+                   6: "Sertoli", 7: "Unknown", 8: "SPG", 9: "Scytes", 10: "STids", 11: "Elongating"}
+
+# Panel genes the reference knows under an older name: panel name -> name in the reference.
+RENAMES = {"Plpp3": "Ppap2b", "Meioc": "1700012B09Rik", "Mesd": "Mesdc2", "Prxl2a": "Fam213a",
+           "Ints6l": "Ddx26b", "Map7d3": "Mtap7d3"}
+
+
+def match_panel_genes(panel):
+    """Panel gene -> the lower-cased name to look for in the reference, renamed genes included."""
+    return {gene: RENAMES.get(gene, gene).lower() for gene in panel}
+
+
+def build_green_major(panel):
+    """Mean log TP10K per type, over the panel genes, from the GEO counts and per-cell labels."""
+    # '#' starts the header line, so the labels begin after four lines of comments.
+    labels = pd.read_csv(GEO_DIR / "GSE112393_MergedAdultMouseST25_PerCellAttributes.txt.gz", sep="\t",
+                         skiprows=4, header=None, usecols=[0, 2], names=["cell", "code"], index_col="cell")
+    wanted = match_panel_genes(panel)
+    wanted_lower = set(wanted.values())
+    cell_total, rows = None, []
+    for chunk in pd.read_csv(GEO_DIR / "GSE112393_MergedAdultMouseST25_DGE.txt.gz", sep="\t",
+                             index_col=0, chunksize=2000):
+        totals = chunk.sum(axis=0)  # every gene counts towards a cell's total
+        cell_total = totals if cell_total is None else cell_total + totals
+        rows.append(chunk[chunk.index.astype(str).str.lower().isin(wanted_lower)])
+    counts = pd.concat(rows)
+    counts.index = counts.index.astype(str).str.lower()
+    counts = counts.loc[~counts.index.duplicated()]
+    # Back to the panel's own spelling, keeping the genes the reference has.
+    found = {gene: name for gene, name in wanted.items() if name in counts.index}
+    counts = counts.loc[list(found.values())].set_axis(list(found.keys()))
+    tp10k = counts.div(cell_total.loc[counts.columns], axis=1) * 1e4
+    types = labels["code"].map(CELL_TYPE_CODES).loc[tp10k.columns]
+    return np.log1p(tp10k.T.groupby(types.to_numpy()).mean().T)  # genes x types
+
+
+REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
+cache = REFERENCE_DIR / "green_major.csv"
+if cache.exists():
+    reference = pd.read_csv(cache, index_col=0)
+else:
+    reference = build_green_major(adata.var_names)
+    reference.to_csv(cache)
+
+reference = reference[CELL_TYPES]
+print(f"reference: {reference.shape[0]} genes x {reference.shape[1]} types")
+```
+
+## D3. Per-cell correlation
+
+Spearman correlation of each cell's raw counts against every reference type, over the genes
+the panel and the reference share. Spearman is Pearson on ranks, so both sides are ranked
+across genes and correlated with one matrix product.
+
+```{python}
+shared = [gene for gene in adata.var_names if gene in reference.index]
+shared_idx = adata.var_names.get_indexer(shared)
+
+
+def spearman_to_reference(counts, ref):
+    """Spearman correlation of each row of counts (cells x genes) with each column of ref (genes x types)."""
+
+    def centred_ranks(x):
+        ranks = rankdata(x, axis=1)
+        ranks = ranks - ranks.mean(axis=1, keepdims=True)
+        return ranks / np.linalg.norm(ranks, axis=1, keepdims=True)
+
+    return centred_ranks(counts) @ centred_ranks(ref.T.to_numpy()).T
+
+
+counts_shared = np.asarray(adata.layers["counts"])[:, shared_idx].astype(np.float32)
+correlation = spearman_to_reference(counts_shared, reference.loc[shared])
+
+plot_shared_genes(adata.n_vars, len(shared))
+plt.show()
+print(f"{correlation.shape[0]:,} cells x {correlation.shape[1]} types; "
+      f"correlations run from {correlation.min():.2f} to {correlation.max():.2f}")
+```
+
+## D4. Standardize within each cell
+
+A cell's correlation to every type rises with how many genes it captured. Standardizing each
+cell's 11 correlations to zero mean and unit variance makes cells comparable with each other,
+and cannot change which type is highest for any cell.
+
+```{python}
+standardized = (correlation - correlation.mean(axis=1, keepdims=True)) / correlation.std(axis=1, keepdims=True)
+for j, cell_type in enumerate(reference.columns):
+    adata.obs[f"corr_{cell_type}"] = standardized[:, j]
+```
+
+## D5. Per-cell call
+
+The type each cell correlates with most, and from it germ or somatic: germ when the type is
+SPG, Scytes, STids or Elongating. Drawn on the UMAP, the germ cells lie along one arc in stage
+order, from Scytes through STids to Elongating, and the somatic types sit on a separate island.
+On the tissue the germ cells fall inside the tubules in rings, with Scytes outermost and
+Elongating nearest the lumen, and the somatic cells between them.
+
+```{python}
+adata.obs["cell_type"] = pd.Categorical(reference.columns.to_numpy()[standardized.argmax(axis=1)],
+                                        categories=CELL_TYPES)
+adata.obs["germ_somatic"] = pd.Categorical(np.where(adata.obs["cell_type"].isin(GERM), "germ", "somatic"),
+                                           categories=["germ", "somatic"])
+
+umap = adata.obsm["X_umap"]
+tissue_xy = np.asarray(adata.obsm["spatial"])
+
+plot_calls(umap, tissue_xy, adata.obs["cell_type"].astype(str), TYPE_COLORS, SAMPLE, "per-cell type")
+plt.show()
+print(adata.obs["cell_type"].value_counts().to_string())
+```
+
+The same calls, collapsed to germ and somatic. Somatic cells are drawn on top, since they are
+the smaller group and would otherwise be buried.
+
+```{python}
+plot_calls(umap, tissue_xy, adata.obs["germ_somatic"].astype(str), GROUP_COLORS, SAMPLE,
+           "germ vs somatic", last=["somatic"])
+plt.show()
+share = adata.obs["germ_somatic"].value_counts(normalize=True)
+print(f"germ {share['germ']:.1%}, somatic {share['somatic']:.1%}")
 ```

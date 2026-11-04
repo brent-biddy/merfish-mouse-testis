@@ -112,11 +112,11 @@ pipeline's, carried over.
 | D2 | `sc.tl.rank_genes_groups(adata, groupby=cluster_key, layer="lognorm", method="wilcoxon")`, read back with `sc.get.rank_genes_groups_df` |
 | D3 | `scipy.stats.rankdata(adata[:, shared].layers["counts"], axis=1)` for the cells, the same for each reference type, then `1 - scipy.spatial.distance.cdist(cell_ranks, type_ranks, metric="correlation")`. `shared` is matched case-insensitively |
 | D4 | Subtract each cell's mean correlation and divide by its standard deviation; write `adata.obs[f"corr_{type}"]` for every type |
-| D5 | `idxmax(axis=1)` over the standardized correlations, written to `adata.obs["cell_type"]` |
-| D6 | `pd.crosstab(adata.obs[cluster_key], adata.obs["cell_type"], normalize="index")`, kept in `adata.uns` |
-| D7 | The call goes to `adata.obs["cluster_type"]`; how it was made to `adata.obs["cluster_call_source"]`, one of `auto`, `manual` or `unresolved` |
-| D8 | A manual call is written to `cluster_type` with source `manual`. A cluster left unresolved keeps `Ambiguous` with source `unresolved`, and its cells get `adata.obs["excluded"] = True` and `adata.obs["excluded_at"] = "major"` |
-| D9 | `cluster_cells` on one major type's cells, then D3 to D8 on the result. The output is `adata.obs["fine_cell_type"]`. A type with no fine reference keeps its major label there, with `adata.obs["fine_source"] = "major"`. An unresolved subcluster's cells get `excluded_at = "fine"` |
+| D5 | `idxmax(axis=1)` over the standardized correlations, written to `adata.obs["cell_type"]`; then `adata.obs["germ_somatic"]` is `"germ"` where `cell_type` is in `GERM = ["SPG", "Scytes", "STids", "Elongating"]` and `"somatic"` otherwise. This is the first pass's annotation |
+| D6 | *Deferred.* `pd.crosstab(adata.obs[cluster_key], adata.obs["cell_type"], normalize="index")`, kept in `adata.uns`; `germ_share = composition[GERM].sum(axis=1)`, where `GERM = ["SPG", "Scytes", "STids", "Elongating"]` |
+| D7 | *Deferred.* `cluster_type` is `"Germ"` where `germ_share` is at least `PURITY` (0.90), even when one germ type alone is; otherwise the top type where its share is at least `PURITY`, and `"Ambiguous"` where neither is, written to `adata.obs["cluster_type"]`; how it was made to `adata.obs["cluster_call_source"]`, one of `auto`, `manual` or `unresolved`. `cell_type` is left as the per-cell call, with all four germ types |
+| D8 | *Deferred.* A manual call is written to `cluster_type` with source `manual`. A cluster left unresolved keeps `Ambiguous` with source `unresolved`, and its cells get `adata.obs["excluded"] = True` and `adata.obs["excluded_at"] = "major"` |
+| D9 | `cluster_cells` on one major type's cells, then D3 to D5 on the result (D6 to D8 too, if turned on). For germ cells that is `adata[adata.obs["germ_somatic"] == "germ"]`, restarted from `layers["counts"]`. The output is `adata.obs["fine_cell_type"]`. A type with no fine reference keeps its major label there, with `adata.obs["fine_source"] = "major"`. An unresolved subcluster's cells get `excluded_at = "fine"` |
 
 Phases E to J read `fine_cell_type` and drop cells where `excluded` is set. In Phase E, per-cell
 results (`tubule_id`, `compartment`) go in the table, and the tubule polygons are saved beside

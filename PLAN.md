@@ -165,8 +165,17 @@ decided by the same sweeps.
 **Scope:** Per section, with the same reference and the same purity threshold for the whole
 cohort, which is what makes calls comparable across sections for Phase J.
 
-Every cell is correlated against a reference, and each cluster is then named from the mix of
-its cells' calls alone.
+Every cell is correlated against a reference, and its top type is its call.
+
+**The first pass annotates cells, not clusters.** Each cell is called germ or somatic from its
+own call, and nothing is named at the cluster level. Clusters are used to look at the data, not
+to annotate it. On b2r0 the per-cell calls separate the two cleanly on the UMAP, and drawn on
+tissue they put germ cells inside the tubules and somatic cells between them. Steps 6 to 8 name
+clusters from the mix of their cells' calls and resolve the ambiguous ones by hand; they are
+deferred until something needs them. The first pass does not try to stage germ cells either,
+because the per-cell call cannot cleanly separate neighbouring germ stages. A second level
+takes the germ cells alone, reclusters them and annotates the stages against Green's GC1-12
+(step 9).
 
 ### Steps
 
@@ -176,8 +185,8 @@ its cells' calls alone.
    Shami's table is loaded as it stands. Panel genes renamed since a reference was made are
    mapped to the names it uses rather than dropped. The reference used is recorded with the
    annotation.
-1. **Choose the resolution,** 1.0 to start.
-2. **Marker genes per cluster,** by a Wilcoxon test on the log-normalized values.
+1. **Choose the resolution,** 1.0 to start. Needed only by the deferred steps 2 and 6 to 8.
+2. **Marker genes per cluster,** by a Wilcoxon test on the log-normalized values. Deferred.
    - Plot: a dot plot of each cluster's top markers.
 3. **Per-cell correlation.** Spearman correlation of each cell's raw counts against every
    reference type, over the genes the panel and reference share. Genes are matched
@@ -186,14 +195,23 @@ its cells' calls alone.
 4. **Standardize within each cell.** A cell's correlation to every type rises with the genes it
    captured; standardizing makes cells comparable with each other without changing any cell's
    top type.
-5. **Per-cell call.** The type each cell correlates with most.
-6. **Cluster composition.** Each cluster's share of cells per called type.
-   - Plot: a heatmap of that composition, with the purity threshold marked.
-7. **Cluster call.** A cluster is named for its top type when that type takes at least 90% of
-   its cells, and Ambiguous otherwise. Each call records how it was made: automatically, by
-   hand, or left unresolved.
+5. **Per-cell call.** The type each cell correlates with most, and from it germ or somatic: a
+   cell is germ when its call is SPG, Scytes, STids or Elongating, and somatic otherwise. This
+   is the first pass's annotation.
+   - Plot: UMAP and tissue coloured by the per-cell type, then by germ or somatic.
+6. **Cluster composition (deferred).** Each cluster's share of cells per called type, and its share of
+   germ cells, the four germ types (SPG, Scytes, STids, Elongating) taken together. The per-cell
+   calls keep all four, and are pooled only to name a cluster: a cluster between two germ stages
+   splits its cells between them, whatever its resolution. Stage is left to step 9.
+   - Plot: a heatmap of that composition, with the purity threshold marked twice: a box where
+     one type reaches it, and a box of another colour across the germ columns where the germ
+     cells together do.
+7. **Cluster call (deferred).** A cluster is named Germ when the germ types together take at least 90% of
+   its cells, including a cluster that is almost all one germ type, and otherwise for its top
+   type when that type takes at least 90%. Anything else is Ambiguous. Each call records how it
+   was made: automatically, by hand, or left unresolved.
    - Plot: UMAP coloured by cluster call, with Ambiguous clusters picked out.
-8. **Resolve Ambiguous clusters by hand.** Each Ambiguous cluster is investigated and given a
+8. **Resolve Ambiguous clusters by hand (deferred).** Each Ambiguous cluster is investigated and given a
    type if the evidence supports one. The evidence is its composition from step 6, its top
    markers from step 2, and where its cells sit in tissue. A short note of the evidence is kept
    per cluster. One rule for what counts as enough evidence applies to every section, so manual
@@ -204,21 +222,21 @@ its cells' calls alone.
      tubules and Leydig cells outside them.
    - Plot: a bar chart of cells per call and of how many were excluded.
 9. **Subcluster the types that have a finer reference.** Once the major types are settled, take
-   the cells of one major type and run the Phase C recipe on them again, then annotate the
-   subclusters against that type's finer reference by steps 3 to 8: the same correlation, the
-   same composition rule, and the same by-hand resolution, recorded the same way. Which types
-   have a finer reference:
+   the cells of one major type and run the Phase C recipe on them again. For germ cells, that
+   set is the cells called germ in step 5. Then annotate the subclusters against that type's
+   finer reference by steps 3 to 5, and by steps 6 to 8 if those are turned on by then. Which
+   types have a finer reference:
 
    | Major type | Fine reference | Status |
    |---|---|---|
-   | Germ cells (SPG, Scytes, STids, Elongating) | Green GC1-12 | **Now** |
+   | Germ (every cell called germ) | Green GC1-12 | **Now** |
    | Sertoli, SPG subtypes | The collaborator's file, if cleared for use | Open question |
    | Leydig, Macrophage, Endothelial, Myoid, InnateLymph, Unknown (Tcf21+) | None yet | Later; other references to find |
 
    The result is each cell's fine cell type, **which is what every later phase reads.** A type
    with no fine reference keeps its major label, and cells in subclusters left unresolved by
    hand are excluded.
-   - Plots: steps 2 to 8 are drawn again at the fine level.
+   - Plots: steps 3 to 5 are drawn again at the fine level.
 
 ### References
 
@@ -248,6 +266,7 @@ Not now. Where the defaults could be swept, and what would show a choice is bett
 | Correlation | Spearman | Pearson on log counts, as the collaborator's script does | Share of cells whose call changes, and which types they move between |
 | Genes | All genes the panel and reference share | Only the genes that vary most across the reference's types, or reference markers computed from the reference data | Agreement with the all-gene calls |
 | Low-confidence cells | Every cell gets its top type | Leave a cell uncalled when its top two types are close | Share of cells left uncalled; whether those are low-count or on boundaries |
+| Germ grouping | Four germ types pooled to name a cluster | Each type on its own, the earlier rule | Share of cells in clusters that pass: on b2r0 at 1.0 it is 26% alone and 84% pooled |
 | Purity threshold, major and fine level | 90% | 70% to 95%, each level on its own | How many clusters become Ambiguous; the share of all cells, and of germ cells, left excluded once hand resolution is done; whether an Ambiguous cluster's own markers set it apart |
 
 Whatever the setting, a call can be sanity-checked by where the type sits in tissue, such as
