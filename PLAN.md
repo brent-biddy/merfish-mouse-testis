@@ -319,14 +319,46 @@ Not done here:
 
 ## Phase F — Radial layering
 
-**Scope:** Per section.
+**Scope:** Per section, on every tubule with an outline from Phase E.
 
-Each cell in a tubule gets a radial position: 0 at the basement membrane, 1 at the lumen.
+Each cell in a tubule gets a radial position, from the tubule wall inward. It uses Alex Vargo's
+outlines, with the definition from his radial code: polar coordinates about the outline's
+centroid.
 
-- Expected order, outside in: spermatogonia and Sertoli nuclei, spermatocytes, round
-  spermatids, elongating spermatids.
-- Checks Phases D and E together; a wrong order points at one of them.
-- Gene expression along the radial axis, within each cell type.
+### Steps
+
+1. **Place the outlines in our frame.** His outlines come in a shifted coordinate frame. The shift
+   is estimated per section as the median, over tubules, of the offset between the middle of a
+   tubule's cells and the middle of its outline, and applied to every outline. Check it: almost
+   every cell assigned to a tubule should fall inside that tubule's outline.
+2. **Radial position per cell.** For each cell assigned to a tubule, take the angle and the
+   distance from the outline's centroid, find the outline's distance from the centroid at that
+   angle by interpolating over the outline's points, and divide. `radial_pos` is one minus that
+   ratio, clipped to 0 to 1: 0 at the wall, 1 at the centroid. `dist_wall_um` is the distance in
+   µm from the outline, 0 for a cell outside it.
+3. **Check the outlines against the model.** The interpolation is exact when the outline is star-shaped
+   about its centroid, meaning every ray from the centroid crosses it once.
+   - Report the share of tubules that are star-shaped, and flag the others.
+   - Report the share of cells beyond the modelled outline.
+   - Report the distance between each outline's centroid and the median position of its cells.
+4. **Check the order of the cell types.** Outside in, the expected order is Sertoli and SPG at the
+   wall, then spermatocytes, round spermatids and elongating spermatids, with the interstitial
+   types at the very edge. The GC clusters should run roughly in index order from the wall inward.
+   - Plot: radial position by cell type, and by GC cluster.
+   - This checks Phases D and E together. A wrong order points at one of them.
+
+The two coordinates are kept. `radial_pos` is the main one: it does not depend on how large a
+tubule is. `dist_wall_um` separates adjacent layers slightly better, but its value for a given
+cell type grows with the tubule's size.
+
+Known limits, not addressed here:
+
+- **No lumen.** Position is scaled to the centroid, not to the lumen, so a cell layer lands at a
+  different value in a tubule with a large lumen. Even the cells nearest the lumen do not reach 1.
+  A lumen boundary would sharpen the Sertoli/SPG and spermatid layers.
+- **Tubules that are not star-shaped** about their centroid get an approximate position. Curved,
+  elongated or obliquely cut tubules are the likely ones.
+- **Expression along the radial axis** within a cell type is a later step that reads `radial_pos`.
 
 ## Phase G — Stage the tubules
 
@@ -343,11 +375,52 @@ which germ cells occur together.
   the germ-cell composition of each tubule, and does not read a stage from them directly.
 - Realistic target: stage groups (I-III, IV-VI, VII-VIII, IX-XII) rather than all twelve.
 
+**For now, Alex's stages are used.** He staged tubules by eye from per-tubule images, into
+exactly those four groups (a few sections also have finer values such as 3-4 or 7), and the
+calls are in the tubule metadata of five sections: a1r0 upper and lower, b2r2, c1r1 and d2r0.
+The other eleven, including b2r0, have none. The phases below run on the staged sections, and a
+staging for the rest is built later and scored against his.
+
+A first look on b2r2 (140 tubules) shows how far germ composition alone gets. From each tubule's
+shares of the 12 GC clusters, a regularized logistic regression recovers his group with 76%
+cross-validated accuracy, against 49% for always guessing the biggest group. Late stages are
+clean (9-12: 95% of tubules right) and 7-8 is the weak one (32%; 63% with balanced class
+weights, at the cost of 4-6 falling from 83% to 53%). Nearly every error lands on the adjacent
+group, so composition recovers the order of stages and blurs the boundaries between his groups.
+These are exploratory numbers from one section, not a method.
+
 ## Phase H — Within the tubule, by stage
 
-**Scope:** Per section.
+**Scope:** Per section, on sections that have stage calls. Developed on b2r2, which is fully
+staged; b2r0 is not.
 
-- Cell-type proportions by stage
+### Steps
+
+1. **Cell-type proportions by stage.** For tubules with a stage group and flagged good for cells
+   in Alex's metadata, each cell type's share of the cells in the tubule, by stage group, with a
+   Kruskal-Wallis test per type. His staging is independent of our calls, so this is not circular
+   even for germ cells.
+   - Plot: stacked bars of the mean composition per stage group.
+2. **Cell density by stage.** Cells of each type per 10,000 µm² of the tubule's outline, to
+   separate a real change in a cell type from a change in the share of the others.
+   - Plot: boxplots per stage group for the four germ types, Sertoli and all cells.
+
+What b2r2 shows (125 tubules: 14 in 1-3, 61 in 4-6, 18 in 7-8, 32 in 9-12): the germ types move
+with stage as expected, with STids falling from 35-39% of cells to 6%, Elongating peaking at 45% in
+7-8, and Scytes high at both ends of the cycle. Sertoli rise from 7.1% of cells in 4-6 to 11.1% in
+9-12 and their density rises with them, from 8.4 to 11.8 per 10,000 µm², so that change is not just
+the denominator. SPG rise weakly. Total density falls in the late groups, 117 to 119 in groups
+1-6 down to 104 in 9-12. The other interstitial types inside the outlines do not vary with stage
+and carry no information about it: they are cells that fall inside generous boundaries, not
+residents of the tubule.
+
+Caveats: one section; 14 and 18 tubules in the smaller groups; the 4-6 group is wide, and its
+cell densities spread widely, as if it held several stages; the outline area includes the lumen, so
+density mixes cell packing with lumen size; p values are not corrected for the number of types
+tested.
+
+Still an outline:
+
 - Gene expression across the cycle per cell type, as pseudobulk per tubule ordered by stage
 - Sertoli-germ cell signalling by stage, from ligand-receptor pairs on the 491-gene panel
 

@@ -126,6 +126,19 @@ pipeline's, carried over.
 | E2 | `tubule_meta = pd.read_csv(TUBULE_META, index_col=0)`, the one `*tubule-metadata*.csv` staged (a `-staged` file for some sections), its index as strings. `tubules` is a DataFrame of `tubule_meta` plus `n_cells` and `germ_share` per tubule from `adata.obs.groupby("tubule_id")`, with columns `good_cells`, `good_circle`, `good_cells_bin`, `area`, `eccen`, `maj_axis_length`. Areas and lengths are in mosaic pixels |
 | E3 | `plot_tubules_on_tissue` and `plot_tubule_qc`; the share inside by cell type is `adata.obs.groupby("cell_type", observed=True)["in_tubule"].mean()` |
 
+**Phase G**
+
+| Step | Code |
+|---|---|
+| G1 | `STAGED = "stage" in tubules.columns`, true when the metadata file is a `-staged` one. `staged` is the rows of `tubules` whose `stage` is in `STAGE_GROUPS = ["1-3", "4-6", "7-8", "9-12"]` and whose `good_cells_bin` is true, with `stage` as an ordered categorical. Finer values such as `3-4` or `7` are left out and counted |
+
+**Phase H**
+
+| Step | Code |
+|---|---|
+| H1 | `composition = pd.crosstab(inside["tubule_id"], inside["cell_type"].astype(str), normalize="index").reindex(columns=CELL_TYPES, fill_value=0).loc[staged.index]`; the mean per stage group is `composition.groupby(staged["stage"], observed=True).mean()`; `scipy.stats.kruskal` per type across the four groups. `inside` is the cells with `in_tubule` |
+| H2 | `counts` is the same crosstab without `normalize`; `area_um2 = staged["area"] * UM_PER_PX ** 2` (`UM_PER_PX = 0.108`); `density = counts.div(area_um2, axis=0) * 1e4`, cells per 10,000 µm², with `germ` and `all cells` columns added |
+
 Phases E to J read `fine_cell_type` and drop cells where `excluded` is set. In Phase E, per-cell
 results (`tubule_id`, `in_tubule`) go in the table. The tubule polygons are not loaded yet; when
 Phase F needs them they are Alex's `global_path` arrays, saved beside the table.

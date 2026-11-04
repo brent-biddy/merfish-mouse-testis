@@ -1,6 +1,6 @@
 ---
 title: "MERFISH testis — per-section analysis"
-subtitle: "Phases B to E: data QC, dimension reduction, cell-type annotation and tubules"
+subtitle: "Phases B to H: data QC, cell-type annotation, tubules and stage"
 author: "Brent Biddy"
 date: today
 format:
@@ -20,12 +20,13 @@ import os
 from pathlib import Path
 
 import anndata as ad
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import scanpy as sc
 import numpy as np
 import pandas as pd
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.stats import rankdata
+from scipy.stats import kruskal, rankdata
 
 # Phase C's low count cut. Phase B draws it as a marker so the plots show what it would
 # remove; nothing is filtered here.
@@ -41,6 +42,16 @@ TYPE_COLORS = {
     "Macrophage": "#8c564b", "InnateLymph": "#bcbd22", "Unknown": "#7f7f7f",
 }
 GROUP_COLORS = {"germ": "#d98c1f", "somatic": "#4a7fb5"}
+
+# Phase D6: the twelve germ-cell clusters, coloured along one ramp so neighbours look alike.
+GC_TYPES = [f"GC{i}" for i in range(1, 13)]
+GC_COLORS = {gc: mcolors.to_hex(plt.cm.turbo(0.05 + 0.9 * i / 11)) for i, gc in enumerate(GC_TYPES)}
+GC_COLORS["not germ"] = "#d9d9d9"
+
+# Phases G and H: the stage groups Alex Vargo staged tubules into, and the mosaic pixel size his
+# tubule areas are in.
+STAGE_GROUPS = ["1-3", "4-6", "7-8", "9-12"]
+UM_PER_PX = 0.108
 
 # The repository root, where the cached reference lives. A render outside the
 # repository sets MERFISH_REPO.
@@ -239,6 +250,36 @@ def plot_tubule_qc(cells_per_tubule, share_inside):
     axes[1].barh(share_inside.index, share_inside.to_numpy(), color="0.35")
     axes[1].invert_yaxis()
     axes[1].set(title="Share of each cell type inside a tubule", xlabel="share of cells", xlim=(0, 1))
+    return fig
+
+
+def plot_stage_composition(mean_composition, tubules_per_group, sample):
+    """H1: the mean cell-type composition of a tubule at each stage group, as stacked bars."""
+    fig, ax = plt.subplots(figsize=(7.5, 5), constrained_layout=True)
+    bottom = np.zeros(len(mean_composition))
+    for cell_type in mean_composition.columns:
+        share = mean_composition[cell_type].to_numpy()
+        ax.bar(range(len(share)), share, bottom=bottom, color=TYPE_COLORS[cell_type], label=cell_type, width=0.7)
+        bottom += share
+    ax.set_xticks(range(len(mean_composition)),
+                  [f"{g}\n(n={tubules_per_group[g]})" for g in mean_composition.index])
+    ax.set(title=f"{sample}: cell-type composition of tubules by stage", xlabel="stage group",
+           ylabel="share of cells in the tubule", ylim=(0, 1))
+    ax.legend(frameon=False, fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1))
+    return fig
+
+
+def plot_stage_density(density, stage, columns, sample):
+    """H2: cells per 10,000 µm² of tubule outline at each stage group, one panel per column."""
+    fig, axes = plt.subplots(2, 3, figsize=(12, 6.5), constrained_layout=True)
+    for ax, column in zip(axes.ravel(), columns):
+        groups = [density.loc[stage == g, column] for g in STAGE_GROUPS]
+        ax.boxplot(groups, tick_labels=STAGE_GROUPS, showfliers=False, patch_artist=True,
+                   boxprops=dict(facecolor=TYPE_COLORS.get(column, "0.6"), alpha=0.6),
+                   medianprops=dict(color="k"))
+        ax.set(title=column, ylabel="cells per 10,000 µm²")
+    fig.suptitle(f"{sample}: cell density in the tubule by stage (n = "
+                 + ", ".join(f"{g}: {int((stage == g).sum())}" for g in STAGE_GROUPS) + ")")
     return fig
 ```
 
@@ -554,6 +595,58 @@ print(f"germ {share['germ']:.1%}, somatic {share['somatic']:.1%}")
 ```
 
 
+## D6. Germ-cell subtypes
+
+The germ cells alone, against Green's twelve germ-cell clusters, GC1 to GC12, as published. The
+steps are D3 to D5 again on a finer reference: Spearman correlation of each germ cell's raw
+counts, standardized within the cell, then its top cluster. Nothing is reclustered. GC1 to GC12
+are differentiation states in order, so on tissue they should run from the wall inward.
+
+```{python}
+gc_file = REFERENCE_DIR / "green_gc.csv"
+if not gc_file.exists():
+    raise FileNotFoundError(f"{gc_file} is missing; the reference is an input and is not built here")
+
+gc_reference = pd.read_csv(gc_file, index_col=0)[GC_TYPES]
+gc_shared = [gene for gene in adata.var_names if gene in gc_reference.index]
+gc_idx = adata.var_names.get_indexer(gc_shared)
+
+is_germ = (adata.obs["germ_somatic"] == "germ").to_numpy()
+germ_counts = np.asarray(adata.layers["counts"])[is_germ][:, gc_idx].astype(np.float32)
+gc_corr = spearman_to_reference(germ_counts, gc_reference.loc[gc_shared])
+gc_std = (gc_corr - gc_corr.mean(axis=1, keepdims=True)) / gc_corr.std(axis=1, keepdims=True)
+
+adata.obs["germ_cluster"] = pd.Categorical([None] * adata.n_obs, categories=GC_TYPES)
+adata.obs.loc[is_germ, "germ_cluster"] = np.array(GC_TYPES)[gc_std.argmax(axis=1)]
+for j, gc in enumerate(GC_TYPES):
+    adata.obs[f"corr_{gc}"] = np.nan
+    adata.obs.loc[is_germ, f"corr_{gc}"] = gc_std[:, j]
+
+gc_calls = adata.obs["germ_cluster"].astype(str).where(is_germ, "not germ")
+plot_calls(umap, tissue_xy, gc_calls, GC_COLORS, SAMPLE, "germ-cell cluster", last=GC_TYPES)
+plt.show()
+print(f"{len(gc_shared)} of {adata.n_vars} panel genes shared with GC1-12")
+print(adata.obs["germ_cluster"].value_counts().sort_index().to_string())
+```
+
+How the germ cells' major type and their cluster line up. Each row is a major type from D5 and
+each cell is the share of that type's cells calling that cluster. SPG should sit in the low
+clusters, Scytes in the middle and Elongating in the high ones.
+
+```{python}
+overlap = pd.crosstab(adata.obs.loc[is_germ, "cell_type"].astype(str),
+                      adata.obs.loc[is_germ, "germ_cluster"].astype(str),
+                      normalize="index").reindex(index=GERM, columns=GC_TYPES, fill_value=0)
+fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
+image = ax.imshow(overlap.to_numpy(), cmap="viridis", aspect="auto")
+ax.set_xticks(range(12), GC_TYPES)
+ax.set_yticks(range(len(GERM)), GERM)
+ax.set_title(f"{SAMPLE}: germ-cell cluster within each major germ type")
+fig.colorbar(image, ax=ax, label="share of the type's cells")
+plt.show()
+```
+
+
 # Phase E — Identify tubules
 
 Every cell gets a tubule, or none. The tubules are Alex Vargo's: his boundaries were traced from
@@ -626,4 +719,93 @@ plot_tubule_qc(tubules["n_cells"].to_numpy(), share_inside)
 plt.show()
 print(f"germ cells inside a tubule: {adata.obs.loc[is_germ, 'in_tubule'].mean():.1%}; "
       f"somatic: {adata.obs.loc[~is_germ, 'in_tubule'].mean():.1%}")
+```
+
+
+# Phase G — Tubule stage
+
+Each tubule cross-section sits at one stage of the epithelial cycle. The stages used here are
+Alex Vargo's: he staged tubules by eye from per-tubule images, into four groups, and the calls are
+in the tubule metadata of the sections he staged. A section without them skips this phase and the
+next, and a staging for those sections is built later.
+
+## G1. Staged tubules
+
+The tubules with a stage in one of the four groups, flagged by him as good for cells. A few
+sections also have finer values, such as `3-4` or `7`, which are left out and counted.
+
+```{python}
+STAGED = "stage" in tubules.columns
+
+if STAGED:
+    good = tubules["good_cells_bin"] == True
+    in_groups = tubules["stage"].isin(STAGE_GROUPS)
+    staged = tubules[good & in_groups].copy()
+    staged["stage"] = pd.Categorical(staged["stage"], STAGE_GROUPS, ordered=True)
+    print(f"{len(staged)} of {len(tubules)} tubules are staged and good for cells; "
+          f"{(good & tubules['stage'].notna() & ~in_groups).sum()} have a finer stage and are left out")
+    print(staged["stage"].value_counts().sort_index().to_string())
+else:
+    print("this section has no stage calls; Phases G and H are skipped")
+```
+
+# Phase H — Within the tubule, by stage
+
+## H1. Cell-type proportions by stage
+
+Each cell type's share of the cells in a tubule, by stage group. His staging does not depend on
+our calls, so the germ composition is not circular here. A Kruskal-Wallis test per type asks
+whether a type's share differs between the groups; the p values are not corrected for the number
+of types. The interstitial types that land inside a tubule's outline do not vary with stage: they
+are cells inside generous boundaries, not residents of the tubule.
+
+```{python}
+if STAGED:
+    inside = adata.obs[adata.obs["in_tubule"]]
+    composition = (
+        pd.crosstab(inside["tubule_id"], inside["cell_type"].astype(str), normalize="index")
+        .reindex(columns=CELL_TYPES, fill_value=0)
+        .loc[staged.index]
+    )
+    mean_composition = composition.groupby(staged["stage"], observed=True).mean()
+
+    summary = pd.DataFrame({
+        cell_type: {**{g: f"{mean_composition.loc[g, cell_type]:.1%}" for g in STAGE_GROUPS},
+                    "Kruskal p": f"{kruskal(*[composition.loc[staged['stage'] == g, cell_type] for g in STAGE_GROUPS]).pvalue:.1e}"}
+        for cell_type in CELL_TYPES
+    }).T
+    print(summary.to_string())
+
+    plot_stage_composition(mean_composition, staged["stage"].value_counts(), SAMPLE)
+    plt.show()
+```
+
+## H2. Cell density by stage
+
+A share changes whenever the other types change. Cells per 10,000 µm² of the tubule's outline
+separate the two. The outline includes the lumen, so a density mixes how tightly cells are packed
+with how large the lumen is.
+
+```{python}
+if STAGED:
+    counts = (
+        pd.crosstab(inside["tubule_id"], inside["cell_type"].astype(str))
+        .reindex(columns=CELL_TYPES, fill_value=0)
+        .loc[staged.index]
+    )
+    area_um2 = staged["area"] * UM_PER_PX**2
+    density = counts.div(area_um2, axis=0) * 1e4
+    density["germ"] = density[GERM].sum(axis=1)
+    density["all cells"] = density[CELL_TYPES].sum(axis=1)
+
+    shown = GERM + ["Sertoli", "germ", "all cells"]
+    medians = density.groupby(staged["stage"], observed=True)[shown].median().T
+    medians["Kruskal p"] = [
+        f"{kruskal(*[density.loc[staged['stage'] == g, column] for g in STAGE_GROUPS]).pvalue:.1e}" for column in shown
+    ]
+    print("median cells per 10,000 µm²:")
+    print(medians.round(1).to_string())
+
+    plot_stage_density(density, staged["stage"], GERM + ["Sertoli", "all cells"], SAMPLE)
+    plt.show()
 ```
