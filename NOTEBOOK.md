@@ -94,7 +94,7 @@ pipeline's, carried over.
 
 | Step | Code |
 |---|---|
-| B1 | `adata = anndata.read_h5ad(TABLE)`, where `TABLE` is the one `*.create_spatialdata_cellpose.h5ad` staged beside the notebook; `adata.layers["counts"] = adata.X.copy()`; then `adata.obs["transcript_count"] = np.asarray(adata.layers["counts"].sum(axis=1)).ravel()` and `adata.obs["gene_count"] = np.asarray((adata.layers["counts"] > 0).sum(axis=1)).ravel()`. The table has neither column, so B1 derives both. They cover the 491 real genes only: blank codewords are in `obsm["blank"]`, not in `X`, and are left out. The sample id is read from `adata.obs["sample"]`, not from the file name. Phase B's plots and C1's high cut read `transcript_count` |
+| B1 | `adata = anndata.read_h5ad(TABLE)`, where `TABLE` is the one `*.create_spatialdata_cellpose.h5ad` staged beside the notebook; `adata.layers["counts"] = adata.X.copy()`; then `adata.obs["transcript_count"] = np.asarray(adata.layers["counts"].sum(axis=1)).ravel()` and `adata.obs["gene_count"] = np.asarray((adata.layers["counts"] > 0).sum(axis=1)).ravel()`. The table has neither column, so B1 derives both. They cover the 491 real genes only: blank codewords are in `obsm["blank"]`, not in `X`, and are left out. The sample id is read from `adata.obs["sample"]`, not from the file name. Phase B's plots and C1's high cut read `transcript_count`. B1 also writes `adata.obs["table_row"] = np.arange(adata.n_obs)` and keeps `N_TABLE_CELLS = adata.n_obs`, because C1 drops cells and an external per-cell file is indexed by the full table |
 | C1 | `sc.pp.filter_cells(adata, min_counts=20)`. The high cut's threshold is `adata.obs["transcript_count"].quantile(q)`, taken before the low cut, then `sc.pp.filter_cells(adata, max_counts=threshold)` |
 | C2 | `sc.pp.normalize_total(adata)`, `sc.pp.log1p(adata)`; then `adata.layers["lognorm"] = adata.X.copy()` |
 | C3 | `sc.pp.scale(adata, zero_center=False, max_value=10)` |
@@ -118,9 +118,17 @@ pipeline's, carried over.
 | D8 | *Deferred.* A manual call is written to `cluster_type` with source `manual`. A cluster left unresolved keeps `Ambiguous` with source `unresolved`, and its cells get `adata.obs["excluded"] = True` and `adata.obs["excluded_at"] = "major"` |
 | D9 | `cluster_cells` on one major type's cells, then D3 to D5 on the result (D6 to D8 too, if turned on). For germ cells that is `adata[adata.obs["germ_somatic"] == "germ"]`, restarted from `layers["counts"]`. The output is `adata.obs["fine_cell_type"]`. A type with no fine reference keeps its major label there, with `adata.obs["fine_source"] = "major"`. An unresolved subcluster's cells get `excluded_at = "fine"` |
 
+**Phase E**
+
+| Step | Code |
+|---|---|
+| E1 | `cell_map = np.load(TUBULE_MAP, allow_pickle=True)["cell_map"]`, where `TUBULE_MAP` is the one `*cell-to-tubule-map-goodcells.npz` staged beside the notebook; `assert len(cell_map) == N_TABLE_CELLS`; `adata.obs["tubule_id"]` is `cell_map[adata.obs["table_row"]]` as a string, `""` where the cell has no tubule; `adata.obs["in_tubule"] = adata.obs["tubule_id"] != ""`. Tubule ids are strings because some sections' ids are not integers |
+| E2 | `tubule_meta = pd.read_csv(TUBULE_META, index_col=0)`, the one `*tubule-metadata*.csv` staged (a `-staged` file for some sections), its index as strings. `tubules` is a DataFrame of `tubule_meta` plus `n_cells` and `germ_share` per tubule from `adata.obs.groupby("tubule_id")`, with columns `good_cells`, `good_circle`, `good_cells_bin`, `area`, `eccen`, `maj_axis_length`. Areas and lengths are in mosaic pixels |
+| E3 | `plot_tubules_on_tissue` and `plot_tubule_qc`; the share inside by cell type is `adata.obs.groupby("cell_type", observed=True)["in_tubule"].mean()` |
+
 Phases E to J read `fine_cell_type` and drop cells where `excluded` is set. In Phase E, per-cell
-results (`tubule_id`, `compartment`) go in the table, and the tubule polygons are saved beside
-it as GeoParquet.
+results (`tubule_id`, `in_tubule`) go in the table. The tubule polygons are not loaded yet; when
+Phase F needs them they are Alex's `global_path` arrays, saved beside the table.
 
 ## The reference cache
 

@@ -1,6 +1,6 @@
 ---
 title: "MERFISH testis — per-section analysis"
-subtitle: "Phases B to D: data QC, dimension reduction and cell-type annotation"
+subtitle: "Phases B to E: data QC, dimension reduction, cell-type annotation and tubules"
 author: "Brent Biddy"
 date: today
 format:
@@ -52,6 +52,10 @@ REFERENCE_DIR = REPO / "results/section_analysis/reference"
 # comma raises unless exactly one matches.
 (TABLE,) = Path(".").glob("*.create_spatialdata_cellpose.h5ad")
 (FOV_EXTENTS,) = Path(".").glob("*.fov_extents.csv")
+# Phase E: Alex Vargo's tubule results for the section, a map from each cell to its tubule and a
+# table per tubule. A section's metadata file may be the "-staged" one.
+(TUBULE_MAP,) = Path(".").glob("*cell-to-tubule-map-goodcells.npz")
+(TUBULE_META,) = Path(".").glob("*tubule-metadata*.csv")
 ```
 
 ```{python}
@@ -205,6 +209,37 @@ def plot_calls(umap, xy, calls, colors, sample, what, last=()):
             axes[1].scatter([], [], c=color, s=25, label=f"{label} ({(calls == label).sum():,})")
     axes[1].legend(frameon=False, fontsize=8, loc="upper left", bbox_to_anchor=(1, 1))
     return fig
+
+
+def plot_tubules_on_tissue(xy, tubule_codes, is_germ, sample):
+    """E3: each tubule in its own colour; somatic cells outside any tubule grey, germ cells outside black."""
+    inside = tubule_codes >= 0
+    colors = np.random.default_rng(5).uniform(0.1, 0.95, (tubule_codes.max() + 1, 3))
+    outside_somatic, outside_germ = ~inside & ~is_germ, ~inside & is_germ
+
+    fig, ax = plt.subplots(figsize=(11, 9.3), constrained_layout=True)
+    ax.scatter(xy[outside_somatic, 0], xy[outside_somatic, 1], c="0.8", s=0.4, linewidths=0, rasterized=True)
+    ax.scatter(xy[inside, 0], xy[inside, 1], c=colors[tubule_codes[inside]], s=0.5, linewidths=0, rasterized=True)
+    ax.scatter(xy[outside_germ, 0], xy[outside_germ, 1], c="k", s=1.5, linewidths=0, rasterized=True)
+    ax.set_aspect("equal")
+    ax.invert_yaxis()
+    ax.set(title=f"{sample}: {tubule_codes.max() + 1} tubules; {outside_germ.sum():,} germ cells outside any (black)",
+           xlabel="x (µm)", ylabel="y (µm)")
+    return fig
+
+
+def plot_tubule_qc(cells_per_tubule, share_inside):
+    """E3: cells per tubule, and the share of each cell type that falls inside a tubule."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8), constrained_layout=True)
+    axes[0].hist(cells_per_tubule, bins=40, color="0.35")
+    axes[0].axvline(np.median(cells_per_tubule), color="tab:blue", lw=1.2,
+                    label=f"median {np.median(cells_per_tubule):.0f}")
+    axes[0].set(title="Cells per tubule", xlabel="cells", ylabel="tubules")
+    axes[0].legend(frameon=False, fontsize=8)
+    axes[1].barh(share_inside.index, share_inside.to_numpy(), color="0.35")
+    axes[1].invert_yaxis()
+    axes[1].set(title="Share of each cell type inside a tubule", xlabel="share of cells", xlim=(0, 1))
+    return fig
 ```
 
 ## B1. Load the section
@@ -224,6 +259,9 @@ assert adata.obs["sample"].nunique() == 1, "one table must hold exactly one samp
 SAMPLE = str(adata.obs["sample"].iat[0])
 
 adata.layers["counts"] = adata.X.copy()
+# C1 drops cells, and a per-cell file from outside is indexed by the full table: keep each cell's row.
+adata.obs["table_row"] = np.arange(adata.n_obs)
+N_TABLE_CELLS = adata.n_obs
 adata.obs["transcript_count"] = np.asarray(adata.layers["counts"].sum(axis=1)).ravel()
 adata.obs["gene_count"] = np.asarray((adata.layers["counts"] > 0).sum(axis=1)).ravel()
 
@@ -513,4 +551,79 @@ plot_calls(umap, tissue_xy, adata.obs["germ_somatic"].astype(str), GROUP_COLORS,
 plt.show()
 share = adata.obs["germ_somatic"].value_counts(normalize=True)
 print(f"germ {share['germ']:.1%}, somatic {share['somatic']:.1%}")
+```
+
+
+# Phase E — Identify tubules
+
+Every cell gets a tubule, or none. The tubules are Alex Vargo's: his boundaries were traced from
+the Cellbound3 and DAPI images, and he assigned each cell to the tubule whose boundary contains
+its centre. This notebook takes his cell-to-tubule map and his per-tubule table as inputs and
+does not redo the segmentation.
+
+## E1. Cell-to-tubule map
+
+The map has one entry per cell of the section's table, in the table's order, and none for a cell
+outside every tubule. C1 dropped cells, so each cell's position in the full table, kept in B1 as
+`table_row`, picks out its entry. Tubule ids are kept as strings, with an empty string for no
+tubule.
+
+```{python}
+cell_map = np.load(TUBULE_MAP, allow_pickle=True)["cell_map"]
+assert len(cell_map) == N_TABLE_CELLS, "the map is not indexed by this section's table"
+
+assigned = cell_map[adata.obs["table_row"].to_numpy()]
+adata.obs["tubule_id"] = np.array(["" if t is None else str(t) for t in assigned], dtype=object)
+adata.obs["in_tubule"] = (adata.obs["tubule_id"] != "").to_numpy()
+
+print(f"{adata.obs['in_tubule'].sum():,} of {adata.n_obs:,} cells are in a tubule "
+      f"({adata.obs['in_tubule'].mean():.0%}); {adata.obs.loc[adata.obs['in_tubule'], 'tubule_id'].nunique()} tubules")
+```
+
+## E2. Tubule table
+
+One row per tubule: his metadata (a quality flag for the cells, whether the outline is a good
+circle, and its area, eccentricity and major axis length, in mosaic pixels), with the number of
+cells in the tubule and the share of them that are germ.
+
+```{python}
+tubule_meta = pd.read_csv(TUBULE_META, index_col=0)
+tubule_meta.index = tubule_meta.index.astype(str)
+
+inside = adata.obs[adata.obs["in_tubule"]]
+per_tubule = pd.DataFrame({
+    "n_cells": inside.groupby("tubule_id").size(),
+    "germ_share": (inside["germ_somatic"] == "germ").groupby(inside["tubule_id"]).mean(),
+})
+tubules = per_tubule.join(tubule_meta, how="left")
+
+print(f"{len(tubules)} tubules; {tubules['good_cells_bin'].sum()} flagged good for cells; "
+      f"{tubules['good_circle'].sum()} with a good circular outline; "
+      f"{tubules['good_cells_bin'].isna().sum()} with no metadata row")
+tubules.head()
+```
+
+## E3. Check the assignment
+
+Each tubule in its own colour, with the somatic cells outside any tubule in grey and the germ
+cells outside in black. Germ cells should be inside tubules, so black marks tubules that have no
+outline or tissue the images did not cover. His boundaries are generous, taking in some of the
+space between tubules, so some interstitial cells land inside a tubule as well; the share of each
+cell type inside shows how many.
+
+```{python}
+codes = pd.factorize(adata.obs["tubule_id"].replace("", np.nan))[0]   # -1 where there is no tubule
+is_germ = (adata.obs["germ_somatic"] == "germ").to_numpy()
+
+plot_tubules_on_tissue(tissue_xy, codes, is_germ, SAMPLE)
+plt.show()
+```
+
+```{python}
+share_inside = adata.obs.groupby("cell_type", observed=True)["in_tubule"].mean()
+
+plot_tubule_qc(tubules["n_cells"].to_numpy(), share_inside)
+plt.show()
+print(f"germ cells inside a tubule: {adata.obs.loc[is_germ, 'in_tubule'].mean():.1%}; "
+      f"somatic: {adata.obs.loc[~is_germ, 'in_tubule'].mean():.1%}")
 ```

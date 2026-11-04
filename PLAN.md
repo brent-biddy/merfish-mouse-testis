@@ -275,19 +275,47 @@ cells.
 
 **Scope:** Per section.
 
-Every cell gets a tubule and a compartment (tubule, boundary or interstitium), and every tubule
-a polygon.
+Every cell gets a tubule, or none, and every tubule carries a few quality flags.
 
-- **From cells:** peritubular myoid cells (Acta2, Myh11) trace each boundary; germ and Sertoli
-  cells fill the inside. Connected tubular cells on a spatial graph, closed with a concave hull.
-- **From the image:** segment tubules and lumens from the mosaic (DAPI, polyT or a boundary
-  stain).
-- Likely a combination: cells for the boundary, the image to check it.
-- QC per tubule: area, circularity, cell count. Flag tubules cut obliquely, since they distort
-  radial position and staging.
+**This phase uses Alex Vargo's existing results rather than a new segmentation.** His tubule
+boundaries are traced from the image: the dark interior of each tubule is found, touching
+tubules are cut apart by a morphological opening, and the wall of each is followed along the
+bright Cellbound3 ring (with DAPI) by a minimum-cost path. He then assigned every cell to the
+tubule whose boundary contains its centre, and wrote a per-tubule metadata table. We take his
+cell-to-tubule map and metadata as inputs for every section. Rebuilding his method is later work.
 
-Per-cell results are stored with the cells; tubule polygons are not per cell, so they are
-stored separately.
+A cell-only method was tried first on b2r0 and abandoned: a distance graph and a Delaunay graph
+on the germ cells both merge touching tubules into pieces of tens of thousands of cells, and a
+density watershed seeds the wrong places because tubules are rings with large lumens.
+
+### Steps
+
+1. **Load the map and the metadata.** The map has one entry per cell of the section's table, in
+   the table's order, so its length must equal the table's; a cell outside every tubule has
+   none. Each cell gets a tubule id from it.
+2. **Tubule table.** One row per tubule: its cells, the share of them that are germ, and his
+   metadata (a quality flag for the cells, whether the outline is a good circle, area,
+   eccentricity and major axis length).
+3. **Check the assignment.**
+   - Plot: the tubules on tissue, each in its own colour, with germ cells that fall outside any
+     tubule picked out.
+   - Plot: cells per tubule, and the share of each cell type that falls inside a tubule. Germ
+     and Sertoli cells should mostly be inside, Leydig and the other interstitial types mostly
+     outside.
+
+What the check shows on b2r0: 143 tubules of a median 700 cells; 92% of germ cells and 87% of
+Sertoli cells inside a tubule. The boundaries are generous, so about half of Leydig and
+Endothelial cells also land inside one. The germ cells left outside, 7.6%, are mostly the
+low-count strip along one edge of the section and a few tubules that have no outline.
+
+Not done here:
+
+- **Compartments.** Only inside or outside a tubule. A boundary compartment needs the polygons.
+- **Oblique tubules.** His eccentricity and circle flags are carried through; a rule for
+  excluding obliquely cut tubules is left until Phase F shows whether they distort the radial
+  order.
+- **The polygons.** Phase F needs them for the radial position; they are one file per tubule on
+  his collection, in mosaic pixel coordinates.
 
 ## Phase F — Radial layering
 
