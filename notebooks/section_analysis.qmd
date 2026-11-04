@@ -1,6 +1,6 @@
 ---
 title: "MERFISH testis — per-section analysis"
-subtitle: "Phase B: segmentation and data QC"
+subtitle: "Phases B and C: data QC, filtering and clustering"
 author: "Brent Biddy"
 date: today
 format:
@@ -20,6 +20,7 @@ from pathlib import Path
 
 import anndata as ad
 import matplotlib.pyplot as plt
+import scanpy as sc
 import numpy as np
 import pandas as pd
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -27,6 +28,11 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 # Phase C's low count cut. Phase B draws it as a marker so the plots show what it would
 # remove; nothing is filtered here.
 LOW_COUNT_CUT = 20
+
+# Phase C's Leiden resolutions, and the one the tissue map draws. Which resolution Phase D
+# annotates is decided there, on how pure each resolution's clusters are; all four are kept.
+RESOLUTIONS = [0.5, 1.0, 1.5, 2.0]
+ANNOTATED_RESOLUTION = 1.0
 
 # What the workflow staged beside the notebook, told apart by file name suffix. The trailing
 # comma raises unless exactly one matches.
@@ -133,6 +139,67 @@ def plot_transcripts_on_tissue(xy, transcripts, vmax, x_profile, y_profile, x_bo
 
     fig.colorbar(pts, cax=cax, orientation="horizontal",
                  label=f"transcripts per cell (colour clipped at the 99th percentile, {vmax:.0f})")
+    return fig
+
+
+def cluster_colors(labels):
+    """One colour per cluster, from a 20-colour map that repeats past 20 clusters."""
+    cmap = plt.get_cmap("tab20")
+    return np.array([cmap(i % 20) for i in range(labels.max())])[labels - 1]
+
+
+def plot_pca_variance(variance_ratio, sample):
+    """C4: variance explained by each principal component."""
+    fig, ax = plt.subplots(figsize=(5, 3.2), constrained_layout=True)
+    ax.plot(np.arange(1, len(variance_ratio) + 1), variance_ratio, "o-", ms=3, color="0.3")
+    ax.set(title=f"{sample}: variance explained per PC", xlabel="PC", ylabel="variance ratio")
+    return fig
+
+
+def plot_umap_by_count(umap, transcripts, vmax, sample):
+    """C6: UMAP coloured by transcript count, low counts drawn first."""
+    order = np.argsort(transcripts)
+    fig, ax = plt.subplots(figsize=(6, 5.5), constrained_layout=True)
+    pts = ax.scatter(umap[order, 0], umap[order, 1], c=transcripts[order], s=0.3, cmap="viridis",
+                     vmax=vmax, linewidths=0, rasterized=True)
+    fig.colorbar(pts, label="transcripts per cell (colour clipped at the 99th percentile)")
+    ax.set(title=f"{sample}: UMAP by transcript count", xlabel="UMAP1", ylabel="UMAP2")
+    return fig
+
+
+def plot_umap_by_resolution(umap, labels_by_resolution):
+    """C7: UMAP coloured by cluster, one panel per resolution, each cluster numbered at its median."""
+    fig, axes = plt.subplots(2, 2, figsize=(10, 9), constrained_layout=True)
+    shuffled = np.random.default_rng(0).permutation(len(umap))  # no cluster hides another
+    for ax, (res, labels) in zip(axes.ravel(), labels_by_resolution.items()):
+        ax.scatter(umap[shuffled, 0], umap[shuffled, 1], c=cluster_colors(labels)[shuffled], s=0.2,
+                   linewidths=0, rasterized=True)
+        for c in range(1, labels.max() + 1):
+            ax.text(*np.median(umap[labels == c], axis=0), str(c), fontsize=7, ha="center", va="center",
+                    bbox=dict(boxstyle="round,pad=0.1", fc="w", alpha=0.6, lw=0))
+        ax.set(title=f"resolution {res}: {labels.max()} clusters", xticks=[], yticks=[])
+    return fig
+
+
+def plot_cells_per_cluster(labels_by_resolution):
+    """C7: cells in each cluster at each resolution; cluster 1 is the largest."""
+    fig, axes = plt.subplots(1, len(labels_by_resolution), figsize=(13, 3), sharey=True,
+                             constrained_layout=True)
+    for ax, (res, labels) in zip(axes, labels_by_resolution.items()):
+        n = np.bincount(labels)[1:]
+        ax.bar(np.arange(1, len(n) + 1), n, color="0.35")
+        ax.set(title=f"resolution {res}", xlabel="cluster (1 = largest)")
+    axes[0].set_ylabel("cells")
+    return fig
+
+
+def plot_clusters_on_tissue(xy, labels, resolution, sample):
+    """C7: the clusters at one resolution drawn on the tissue."""
+    fig, ax = plt.subplots(figsize=(9, 7.5), constrained_layout=True)
+    ax.scatter(xy[:, 0], xy[:, 1], c=cluster_colors(labels), s=0.5, linewidths=0, rasterized=True)
+    ax.set_aspect("equal")
+    ax.invert_yaxis()
+    ax.set(title=f"{sample}: Leiden {resolution} on tissue", xlabel="x (µm)", ylabel="y (µm)")
     return fig
 ```
 
@@ -265,4 +332,127 @@ plot_transcripts_on_tissue(
 )
 plt.show()
 print(f"{len(fov)} fields of view, about {fov_size:.0f} µm square")
+```
+
+
+# Phase C — Filtering and clustering
+
+One default recipe, run on every section and left untuned: Phase D is the priority, and where
+a sweep could improve this is listed in `PLAN.md`. Steps C2 to C7 are written out here one at a
+time; they become a single `cluster_cells` function when Phase D subclusters one cell type with
+the same recipe.
+
+## C1. Filter cells
+
+Drop cells under `LOW_COUNT_CUT` transcripts, the cut marked in B2. The high cut for doublets
+and merged cells is off. All 491 genes are kept: the panel is already curated, so there is no
+highly-variable-gene selection and no gene filter.
+
+```{python}
+n_before = adata.n_obs
+sc.pp.filter_cells(adata, min_counts=LOW_COUNT_CUT)
+print(f"kept {adata.n_obs:,} of {n_before:,} cells ({1 - adata.n_obs / n_before:.1%} dropped), "
+      f"{adata.n_vars} genes")
+```
+
+## C2. Normalize
+
+Scale every cell to the section's median total, then take the log. The log-normalized values
+are kept in a layer, because scaling overwrites `X` and the markers in Phase D are read from
+them.
+
+```{python}
+sc.pp.normalize_total(adata)
+sc.pp.log1p(adata)
+adata.layers["lognorm"] = adata.X.copy()
+```
+
+## C3. Scale
+
+Unit variance, not centred, clipped at 10.
+
+```{python}
+sc.pp.scale(adata, zero_center=False, max_value=10)
+```
+
+## C4. PCA
+
+Thirty components. The plot shows whether 30 is enough: the curve should be flat well before
+the last component.
+
+```{python}
+sc.pp.pca(adata, n_comps=30, random_state=0)
+
+variance_ratio = adata.uns["pca"]["variance_ratio"]
+plot_pca_variance(variance_ratio, SAMPLE)
+plt.show()
+print(f"30 PCs explain {variance_ratio.sum():.1%} of the variance")
+```
+
+## C5. Neighbour graph
+
+Fifteen neighbours, cosine distance.
+
+```{python}
+sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)
+```
+
+## C6. UMAP
+
+Coloured by transcript count, to show whether the structure follows how deeply a cell was
+read rather than what it is. A gradient across one region is depth; a split into separate
+islands is not.
+
+```{python}
+sc.tl.umap(adata, random_state=0)
+
+plot_umap_by_count(
+    adata.obsm["X_umap"], adata.obs["transcript_count"].to_numpy(),
+    np.quantile(adata.obs["transcript_count"], 0.99), SAMPLE,
+)
+plt.show()
+```
+
+## C7. Leiden
+
+Clustering at each resolution in `RESOLUTIONS`. Leiden's own numbers say nothing about size,
+so each resolution's clusters are renumbered 1 to k by cell count, and cluster 1 is the
+largest. Every later call and figure names a cluster by that number.
+
+The UMAP is one continuous cloud, so no resolution is the right one: the germ cells are a
+trajectory that Leiden cuts at arbitrary points at any setting. The resolutions are kept
+side by side, leaning towards more clusters than types, since several clusters can take the
+same name in Phase D and a mixed one cannot. Which to annotate is decided there, on how pure
+each resolution's clusters are.
+
+```{python}
+def relabel_by_size(labels):
+    """Renumber clusters 1..k by descending cell count, so 1 is the largest."""
+    mapping = {old: new for new, old in enumerate(labels.value_counts().index, start=1)}
+    return labels.map(mapping).astype("category").cat.reorder_categories(sorted(mapping.values()))
+
+
+for res in RESOLUTIONS:
+    key = f"leiden_{res}"
+    sc.tl.leiden(adata, resolution=res, key_added=key, flavor="igraph", n_iterations=2, random_state=0)
+    adata.obs[key] = relabel_by_size(adata.obs[key])
+
+labels_by_resolution = {res: adata.obs[f"leiden_{res}"].astype(int).to_numpy() for res in RESOLUTIONS}
+
+plot_umap_by_resolution(adata.obsm["X_umap"], labels_by_resolution)
+plt.show()
+plot_cells_per_cluster(labels_by_resolution)
+plt.show()
+```
+
+The same clusters on the tissue, at `ANNOTATED_RESOLUTION`. A cluster that is a cell type
+should sit in one place, or in one layer of the tubule; one scattered across the section is
+more likely to be depth or a seam.
+
+```{python}
+plot_clusters_on_tissue(
+    np.asarray(adata.obsm["spatial"]), labels_by_resolution[ANNOTATED_RESOLUTION],
+    ANNOTATED_RESOLUTION, SAMPLE,
+)
+plt.show()
 ```
