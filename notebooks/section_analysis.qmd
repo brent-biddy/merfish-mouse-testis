@@ -22,8 +22,6 @@ import anndata as ad
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.collections import PatchCollection
-from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Phase C's low count cut. Phase B draws it as a marker so the plots show what it would
@@ -103,17 +101,14 @@ def plot_blank_codewords(gene_totals, blank_totals, cells_per_blank_count):
     return fig
 
 
-def plot_transcripts_on_tissue(xy, transcripts, vmax, x_profile, y_profile, fov_boxes, x_bounds, y_bounds):
+def plot_transcripts_on_tissue(xy, transcripts, vmax, x_profile, y_profile, x_bounds, y_bounds):
     """B5: transcript count drawn on tissue, with its mean along x and y at the margins.
 
-    fov_boxes is one row per field of view: x, y of its corner, then width and height.
     x_bounds and y_bounds are where the field-of-view columns and rows start and end.
     """
     fig, ax = plt.subplots(figsize=(8, 7), constrained_layout=True)
     pts = ax.scatter(xy[:, 0], xy[:, 1], c=transcripts, s=0.4, cmap="viridis", vmin=0, vmax=vmax,
                      linewidths=0, rasterized=True)
-    ax.add_collection(PatchCollection([Rectangle((x, y), w, h) for x, y, w, h in fov_boxes],
-                                      facecolor="none", edgecolor="red", linewidth=0.3, alpha=0.5))
     ax.set_aspect("equal")
     ax.invert_yaxis()
     ax.set(xlabel="x (µm)", ylabel="y (µm)")
@@ -231,10 +226,10 @@ for label, cut in [("median", np.median(blank_totals)), ("95th percentile", np.q
 Where in the section cells were read poorly. Each dot is a cell, coloured by its transcript
 count. The curves on the top and right edges are the mean transcripts per cell along x and
 along y, in 10 µm bins; they share the map's axes, so a dip sits directly over the part of the
-tissue it comes from. The red boxes are the imaging fields of view, and the red lines on the
-curves are where their columns and rows start and end. Where the mean dips on a line, cells
-along that field-of-view boundary were read less deeply; a wide, smooth fall towards the
-border of the tissue is a different thing, the edge. Nothing is cut on either.
+tissue it comes from. The red lines on the curves are where the imaging fields of view's
+columns and rows start and end. Where the mean dips on a line, cells along that
+field-of-view boundary were read less deeply; a wide, smooth fall towards the border of the
+tissue is a different thing, the edge. Nothing is cut on either.
 
 ```{python}
 xy = np.asarray(adata.obsm["spatial"])
@@ -258,7 +253,6 @@ def column_starts(edge, gap=100):
 
 
 fov = pd.read_csv(FOV_EXTENTS, index_col="fov")
-fov_boxes = np.column_stack([fov.x_min, fov.y_min, fov.x_max - fov.x_min, fov.y_max - fov.y_min])
 fov_size = float(np.median(fov.x_max - fov.x_min))
 x_starts, y_starts = column_starts(fov.x_min), column_starts(fov.y_min)
 x_bounds = np.sort(np.concatenate([x_starts, x_starts + fov_size]))
@@ -267,7 +261,7 @@ y_bounds = np.sort(np.concatenate([y_starts, y_starts + fov_size]))
 plot_transcripts_on_tissue(
     xy, transcripts, np.quantile(transcripts, 0.99),
     mean_by_bin(xy[:, 0], transcripts), mean_by_bin(xy[:, 1], transcripts),
-    fov_boxes, x_bounds, y_bounds,
+    x_bounds, y_bounds,
 )
 plt.show()
 print(f"{len(fov)} fields of view, about {fov_size:.0f} µm square")
