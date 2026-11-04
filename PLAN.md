@@ -104,7 +104,7 @@ applies to the segmentation as it stands; none means re-segmenting.
 Every row is judged by the same two questions: are the cells it removes worse than the rest,
 and does removing them change the clusters or the Phase D calls.
 
-## Phase C — Filtering and clustering
+## Phase C — Filtering and dimension reduction
 
 **Scope:** Per section, with one default recipe for every section.
 
@@ -127,19 +127,12 @@ phase and left for later.
 6. **UMAP.**
    - Plot: UMAP coloured by transcript count, to show whether structure tracks depth rather
      than type.
-7. **Leiden at 0.5, 1.0, 1.5 and 2.0.** Each resolution's clusters are renumbered 1..k by size,
-   so cluster 1 is the largest. Every call and figure names a cluster by that number.
-   - Plot: UMAP coloured by cluster, one panel per resolution.
-   - Plot: cells per cluster at each resolution.
-   - Plot: the clusters drawn on tissue at the resolution annotated, to show whether they are
-     spatially coherent.
-
-The same recipe, steps 2 to 7, is used again when a single cell type is subclustered in
-Phase D step 9, restarted from its raw counts rather than reusing the section-wide result.
-
-1.0 may turn out too coarse once annotation narrows down to finer types: germ cells are a
-continuous trajectory that Leiden cuts at arbitrary points, so a resolution is judged by whether
-its clusters are fine enough to match the reference's types.
+Nothing is clustered. Cells are annotated one at a time in Phase D, and the UMAP is for looking
+at the data. If clusters are needed later, for the deferred cluster steps in Phase D or for
+reclustering the germ cells in step 9, they are Leiden at 0.5, 1.0, 1.5 and 2.0, each
+resolution's clusters renumbered 1..k by size so that cluster 1 is the largest, and a cluster is
+always named by that number. The same recipe, steps 2 to 6 then Leiden, would be restarted from
+raw counts on a single cell type's cells.
 
 ### Sweeps for later
 
@@ -168,19 +161,19 @@ cohort, which is what makes calls comparable across sections for Phase J.
 Every cell is correlated against a reference, and its top type is its call.
 
 **The first pass annotates cells, not clusters.** Each cell is called germ or somatic from its
-own call, and nothing is named at the cluster level. Clusters are used to look at the data, not
-to annotate it. On b2r0 the per-cell calls separate the two cleanly on the UMAP, and drawn on
+own call. Nothing is clustered, and nothing is named at the cluster level. On b2r0 the per-cell calls separate the two cleanly on the UMAP, and drawn on
 tissue they put germ cells inside the tubules and somatic cells between them. Steps 6 to 8 name
 clusters from the mix of their cells' calls and resolve the ambiguous ones by hand; they are
-deferred until something needs them. The first pass does not try to stage germ cells either,
+deferred until something needs them, and they need a clustering that Phase C no longer runs. The first pass does not try to stage germ cells either,
 because the per-cell call cannot cleanly separate neighbouring germ stages. A second level
 takes the germ cells alone, reclusters them and annotates the stages against Green's GC1-12
 (step 9).
 
 ### Steps
 
-0. **Build or load the reference, once for the cohort.** The first section builds it and the
-   rest load it. Green's 11 major types are rebuilt from the published counts and labels, as the
+0. **Load the reference, made once for the cohort.** The table is made outside the notebook and
+   every section loads it; the notebook never builds it, and a missing table is an error.
+   Green's 11 major types are rebuilt from the published counts and labels, as the
    mean expression per type over the panel genes. Green's GC1-12 are taken as published, and
    Shami's table is loaded as it stands. Panel genes renamed since a reference was made are
    mapped to the names it uses rather than dropped. The reference used is recorded with the

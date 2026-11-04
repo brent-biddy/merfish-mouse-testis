@@ -59,7 +59,7 @@ each other.
 | Checkpoint | After | Key holds |
 |---|---|---|
 | Reference | D0 | The reference and its level; no sample, so every section shares it |
-| 1, clustered | C7 | The section, the filter, normalization, PCA, neighbour and Leiden settings, and the backend |
+| 1, embedded | C6 | The section, the filter, normalization, PCA and neighbour settings, and the backend |
 | 2, annotated | D8 | Checkpoint 1's key, the resolution, the reference and the purity threshold |
 
 Changing anything in Phase C reruns C1 to C7 and invalidates checkpoint 2 with it, since
@@ -71,7 +71,7 @@ later phases read whichever columns they need from it.
 A checkpoint after C2 could be added so that changing PCA, neighbours or Leiden does not redo
 filtering and normalization. Not needed yet; add it if clustering b2r0 turns out slow.
 
-## One clustering function, two levels
+## One clustering function, two levels (deferred)
 
 Steps C2 to C7 are one function, `cluster_cells(adata)`, and the same function reclusters a
 single cell type's cells in D9. Nothing is reused between levels: the subset starts again from
@@ -101,14 +101,14 @@ pipeline's, carried over.
 | C4 | `sc.pp.pca(adata, n_comps=30, random_state=0)` |
 | C5 | `sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)` |
 | C6 | `sc.tl.umap(adata, random_state=0)` |
-| C7 | For each resolution `r`: `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph", n_iterations=2, random_state=0)`, then our own `relabel_by_size()` renumbers the clusters 1..k by size |
+| C7 | *Not run; the notebook does not cluster.* For each resolution `r`: `sc.tl.leiden(adata, resolution=r, key_added=f"leiden_{r}", flavor="igraph", n_iterations=2, random_state=0)`, then our own `relabel_by_size()` renumbers the clusters 1..k by size |
 
 **Phase D**
 
 | Step | Code |
 |---|---|
 | D0 | Built per reference as described under the reference cache below; the chosen one is stored in `adata.uns["reference"]` |
-| D1 | `cluster_key = "leiden_1.0"` |
+| D1 | *Deferred.* `cluster_key = "leiden_1.0"` |
 | D2 | `sc.tl.rank_genes_groups(adata, groupby=cluster_key, layer="lognorm", method="wilcoxon")`, read back with `sc.get.rank_genes_groups_df` |
 | D3 | `scipy.stats.rankdata(adata[:, shared].layers["counts"], axis=1)` for the cells, the same for each reference type, then `1 - scipy.spatial.distance.cdist(cell_ranks, type_ranks, metric="correlation")`. `shared` is matched case-insensitively |
 | D4 | Subtract each cell's mean correlation and divide by its standard deviation; write `adata.obs[f"corr_{type}"]` for every type |
@@ -125,13 +125,13 @@ it as GeoParquet.
 ## The reference cache
 
 D0 is the first step any run reaches that needs the reference. Its checkpoint is written at
-`results/<notebook>/reference/` rather than under a sample, so the first section run builds it
-and the other fifteen load a table of a few hundred genes by eleven types. The full GEO dataset
+`results/<notebook>/reference/` rather than under a sample, so it is made once outside the
+notebook and all sixteen sections load a table of a few hundred genes by eleven types. The full GEO dataset
 is read in chunks and dropped once the table is saved, so it never stays in memory. The
 reference is also stored in the object's `uns`, so a checkpoint records which reference its
 calls were made against.
 
-How D0 builds each one:
+How each one is made, outside the notebook:
 
 - *Green, 11 major types:* read the GEO counts in chunks, `pd.read_csv(dge, sep="\t",
   index_col=0, chunksize=...)`, summing every cell's total over all genes and keeping only the

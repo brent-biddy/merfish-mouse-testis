@@ -1,6 +1,6 @@
 ---
 title: "MERFISH testis — per-section analysis"
-subtitle: "Phases B to D: data QC, clustering and cell-type annotation"
+subtitle: "Phases B to D: data QC, dimension reduction and cell-type annotation"
 author: "Brent Biddy"
 date: today
 format:
@@ -31,11 +31,6 @@ from scipy.stats import rankdata
 # remove; nothing is filtered here.
 LOW_COUNT_CUT = 20
 
-# Phase C's Leiden resolutions, and the one the tissue map draws. Which resolution Phase D
-# annotates is decided there, on how pure each resolution's clusters are; all four are kept.
-RESOLUTIONS = [0.5, 1.0, 1.5, 2.0]
-ANNOTATED_RESOLUTION = 1.0
-
 # Phase D: the reference's cell types, germ first, and the colours the figures draw them in.
 GERM = ["SPG", "Scytes", "STids", "Elongating"]
 SOMATIC = ["Sertoli", "Leydig", "Myoid", "Endothelial", "Macrophage", "InnateLymph", "Unknown"]
@@ -47,11 +42,10 @@ TYPE_COLORS = {
 }
 GROUP_COLORS = {"germ": "#d98c1f", "somatic": "#4a7fb5"}
 
-# The repository root, where the reference data and its cache live. A render outside the
+# The repository root, where the cached reference lives. A render outside the
 # repository sets MERFISH_REPO.
 _start = Path(os.environ["MERFISH_REPO"]) if "MERFISH_REPO" in os.environ else Path.cwd()
 REPO = next(p for p in [_start, *_start.parents] if (p / "PLAN.md").exists())
-GEO_DIR = REPO / "data/reference/green2018"
 REFERENCE_DIR = REPO / "results/section_analysis/reference"
 
 # What the workflow staged beside the notebook, told apart by file name suffix. The trailing
@@ -162,12 +156,6 @@ def plot_transcripts_on_tissue(xy, transcripts, vmax, x_profile, y_profile, x_bo
     return fig
 
 
-def cluster_colors(labels):
-    """One colour per cluster, from a 20-colour map that repeats past 20 clusters."""
-    cmap = plt.get_cmap("tab20")
-    return np.array([cmap(i % 20) for i in range(labels.max())])[labels - 1]
-
-
 def plot_pca_variance(variance_ratio, sample):
     """C4: variance explained by each principal component."""
     fig, ax = plt.subplots(figsize=(5, 3.2), constrained_layout=True)
@@ -184,42 +172,6 @@ def plot_umap_by_count(umap, transcripts, vmax, sample):
                      vmax=vmax, linewidths=0, rasterized=True)
     fig.colorbar(pts, label="transcripts per cell (colour clipped at the 99th percentile)")
     ax.set(title=f"{sample}: UMAP by transcript count", xlabel="UMAP1", ylabel="UMAP2")
-    return fig
-
-
-def plot_umap_by_resolution(umap, labels_by_resolution):
-    """C7: UMAP coloured by cluster, one panel per resolution, each cluster numbered at its median."""
-    fig, axes = plt.subplots(2, 2, figsize=(10, 9), constrained_layout=True)
-    shuffled = np.random.default_rng(0).permutation(len(umap))  # no cluster hides another
-    for ax, (res, labels) in zip(axes.ravel(), labels_by_resolution.items()):
-        ax.scatter(umap[shuffled, 0], umap[shuffled, 1], c=cluster_colors(labels)[shuffled], s=0.2,
-                   linewidths=0, rasterized=True)
-        for c in range(1, labels.max() + 1):
-            ax.text(*np.median(umap[labels == c], axis=0), str(c), fontsize=7, ha="center", va="center",
-                    bbox=dict(boxstyle="round,pad=0.1", fc="w", alpha=0.6, lw=0))
-        ax.set(title=f"resolution {res}: {labels.max()} clusters", xticks=[], yticks=[])
-    return fig
-
-
-def plot_cells_per_cluster(labels_by_resolution):
-    """C7: cells in each cluster at each resolution; cluster 1 is the largest."""
-    fig, axes = plt.subplots(1, len(labels_by_resolution), figsize=(13, 3), sharey=True,
-                             constrained_layout=True)
-    for ax, (res, labels) in zip(axes, labels_by_resolution.items()):
-        n = np.bincount(labels)[1:]
-        ax.bar(np.arange(1, len(n) + 1), n, color="0.35")
-        ax.set(title=f"resolution {res}", xlabel="cluster (1 = largest)")
-    axes[0].set_ylabel("cells")
-    return fig
-
-
-def plot_clusters_on_tissue(xy, labels, resolution, sample):
-    """C7: the clusters at one resolution drawn on the tissue."""
-    fig, ax = plt.subplots(figsize=(9, 7.5), constrained_layout=True)
-    ax.scatter(xy[:, 0], xy[:, 1], c=cluster_colors(labels), s=0.5, linewidths=0, rasterized=True)
-    ax.set_aspect("equal")
-    ax.invert_yaxis()
-    ax.set(title=f"{sample}: Leiden {resolution} on tissue", xlabel="x (µm)", ylabel="y (µm)")
     return fig
 
 
@@ -387,12 +339,10 @@ print(f"{len(fov)} fields of view, about {fov_size:.0f} µm square")
 ```
 
 
-# Phase C — Filtering and clustering
+# Phase C — Filtering and dimension reduction
 
-One default recipe, run on every section and left untuned: Phase D is the priority, and where
-a sweep could improve this is listed in `PLAN.md`. Steps C2 to C7 are written out here one at a
-time; they become a single `cluster_cells` function when Phase D subclusters one cell type with
-the same recipe.
+One default recipe, run on every section and left untuned. Nothing is clustered: cells are
+annotated one at a time in Phase D, and the UMAP below is for looking at the data.
 
 ## C1. Filter cells
 
@@ -465,117 +415,27 @@ plot_umap_by_count(
 plt.show()
 ```
 
-## C7. Leiden
-
-Clustering at each resolution in `RESOLUTIONS`. Leiden's own numbers say nothing about size,
-so each resolution's clusters are renumbered 1 to k by cell count, and cluster 1 is the
-largest. Every later call and figure names a cluster by that number.
-
-The UMAP is one continuous cloud, so no resolution is the right one: the germ cells are a
-trajectory that Leiden cuts at arbitrary points at any setting. The resolutions are kept
-side by side, leaning towards more clusters than types, since several clusters can take the
-same name in Phase D and a mixed one cannot. Which to annotate is decided there, on how pure
-each resolution's clusters are.
-
-```{python}
-def relabel_by_size(labels):
-    """Renumber clusters 1..k by descending cell count, so 1 is the largest."""
-    mapping = {old: new for new, old in enumerate(labels.value_counts().index, start=1)}
-    return labels.map(mapping).astype("category").cat.reorder_categories(sorted(mapping.values()))
-
-
-for res in RESOLUTIONS:
-    key = f"leiden_{res}"
-    sc.tl.leiden(adata, resolution=res, key_added=key, flavor="igraph", n_iterations=2, random_state=0)
-    adata.obs[key] = relabel_by_size(adata.obs[key])
-
-labels_by_resolution = {res: adata.obs[f"leiden_{res}"].astype(int).to_numpy() for res in RESOLUTIONS}
-
-plot_umap_by_resolution(adata.obsm["X_umap"], labels_by_resolution)
-plt.show()
-plot_cells_per_cluster(labels_by_resolution)
-plt.show()
-```
-
-The same clusters on the tissue, at `ANNOTATED_RESOLUTION`. A cluster that is a cell type
-should sit in one place, or in one layer of the tubule; one scattered across the section is
-more likely to be depth or a seam.
-
-```{python}
-plot_clusters_on_tissue(
-    np.asarray(adata.obsm["spatial"]), labels_by_resolution[ANNOTATED_RESOLUTION],
-    ANNOTATED_RESOLUTION, SAMPLE,
-)
-plt.show()
-```
-
-
 # Phase D — Cell-type annotation
 
 Every cell is correlated against a reference and takes the type it correlates with most. The
 first pass stops at germ or somatic: a cell is germ when that type is one of the four germ
-types, and somatic otherwise. Nothing is named at the cluster level. Clusters here are for
-looking at the data, and naming them from the mix of their cells' calls is deferred until
-something needs it (D1, D2 and D6 to D8 in `PLAN.md`). Germ stage is left to a later recluster
-of the germ cells alone.
+types, and somatic otherwise. Nothing is clustered, and nothing is named at the cluster level.
+Germ stage is left to a later step on the germ cells alone.
 
 ## D0. The reference
 
 Green et al. 2018's 11 major cell types, as the mean expression per type over the panel genes:
-ln(mean TP10K + 1), rebuilt from the published counts and per-cell labels. Building it reads an
-81 MB count table of 37,241 genes by 34,633 cells in chunks, which takes a few minutes, so the
-result is cached once for every section and loaded by the rest.
-
-A panel gene renamed since the reference was made is looked up under the name the reference
-uses rather than dropped. `Catspere1` is in neither name and is left out.
+ln(mean TP10K + 1). The table is made once for every section from the published counts and
+labels (`NOTEBOOK.md` has the recipe) and is always there to load. The notebook never builds
+it: a missing file is an error, since building it silently would take minutes and could differ
+from the table every other section used.
 
 ```{python}
-CELL_TYPE_CODES = {1: "InnateLymph", 2: "Macrophage", 3: "Endothelial", 4: "Myoid", 5: "Leydig",
-                   6: "Sertoli", 7: "Unknown", 8: "SPG", 9: "Scytes", 10: "STids", 11: "Elongating"}
+reference_file = REFERENCE_DIR / "green_major.csv"
+if not reference_file.exists():
+    raise FileNotFoundError(f"{reference_file} is missing; the reference is an input and is not built here")
 
-# Panel genes the reference knows under an older name: panel name -> name in the reference.
-RENAMES = {"Plpp3": "Ppap2b", "Meioc": "1700012B09Rik", "Mesd": "Mesdc2", "Prxl2a": "Fam213a",
-           "Ints6l": "Ddx26b", "Map7d3": "Mtap7d3"}
-
-
-def match_panel_genes(panel):
-    """Panel gene -> the lower-cased name to look for in the reference, renamed genes included."""
-    return {gene: RENAMES.get(gene, gene).lower() for gene in panel}
-
-
-def build_green_major(panel):
-    """Mean log TP10K per type, over the panel genes, from the GEO counts and per-cell labels."""
-    # '#' starts the header line, so the labels begin after four lines of comments.
-    labels = pd.read_csv(GEO_DIR / "GSE112393_MergedAdultMouseST25_PerCellAttributes.txt.gz", sep="\t",
-                         skiprows=4, header=None, usecols=[0, 2], names=["cell", "code"], index_col="cell")
-    wanted = match_panel_genes(panel)
-    wanted_lower = set(wanted.values())
-    cell_total, rows = None, []
-    for chunk in pd.read_csv(GEO_DIR / "GSE112393_MergedAdultMouseST25_DGE.txt.gz", sep="\t",
-                             index_col=0, chunksize=2000):
-        totals = chunk.sum(axis=0)  # every gene counts towards a cell's total
-        cell_total = totals if cell_total is None else cell_total + totals
-        rows.append(chunk[chunk.index.astype(str).str.lower().isin(wanted_lower)])
-    counts = pd.concat(rows)
-    counts.index = counts.index.astype(str).str.lower()
-    counts = counts.loc[~counts.index.duplicated()]
-    # Back to the panel's own spelling, keeping the genes the reference has.
-    found = {gene: name for gene, name in wanted.items() if name in counts.index}
-    counts = counts.loc[list(found.values())].set_axis(list(found.keys()))
-    tp10k = counts.div(cell_total.loc[counts.columns], axis=1) * 1e4
-    types = labels["code"].map(CELL_TYPE_CODES).loc[tp10k.columns]
-    return np.log1p(tp10k.T.groupby(types.to_numpy()).mean().T)  # genes x types
-
-
-REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
-cache = REFERENCE_DIR / "green_major.csv"
-if cache.exists():
-    reference = pd.read_csv(cache, index_col=0)
-else:
-    reference = build_green_major(adata.var_names)
-    reference.to_csv(cache)
-
-reference = reference[CELL_TYPES]
+reference = pd.read_csv(reference_file, index_col=0)[CELL_TYPES]
 print(f"reference: {reference.shape[0]} genes x {reference.shape[1]} types")
 ```
 
