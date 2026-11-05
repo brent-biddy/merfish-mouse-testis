@@ -1018,54 +1018,70 @@ def radial_position_fast(xy, polygon):
 
 
 (points_name,) = sdata.points
-transcripts = sdata.points[points_name][["x", "y", "gene", "cell_id"]].compute()
-gene_column = transcripts["gene"].astype(str).map(pd.Series(np.arange(adata.n_vars), index=adata.var_names))
-is_real = gene_column.notna().to_numpy()
-transcript_xy = transcripts.loc[is_real, ["x", "y"]].to_numpy()
-transcript_gene = gene_column[is_real].to_numpy().astype(np.int64)
-transcript_in_cell = transcripts.loc[is_real, "cell_id"].to_numpy() >= 0        # -1 is a transcript in no cell
-del transcripts
+points = sdata.points[points_name]
+gene_index = pd.Series(np.arange(adata.n_vars), index=adata.var_names)
 
-# Which outlines contain each transcript, boundary included.
 tubule_names = list(tubules_um)
-contained = {}
-for name in tubule_names:
-    x0, y0, x1, y1 = tubules_um[name].bounds
-    in_box = np.flatnonzero((transcript_xy[:, 0] >= x0) & (transcript_xy[:, 0] <= x1)
-                            & (transcript_xy[:, 1] >= y0) & (transcript_xy[:, 1] <= y1))
-    contained[name] = in_box[shapely.intersects_xy(tubules_um[name], transcript_xy[in_box, 0], transcript_xy[in_box, 1])]
-
-# His rule for a transcript in more than one outline; tubules are taken in order of their id.
-owner = np.full(len(transcript_xy), -1, dtype=np.int32)
 in_table = np.array([name in tubule_meta.index for name in tubule_names])
 good_for_cells = np.array([bool(tubule_meta.loc[name, "good_cells_bin"]) if name in tubule_meta.index else False
                            for name in tubule_names])
-for k in np.argsort([int(name) for name in tubule_names]):
-    at = contained[tubule_names[k]]
-    claimed = owner[at]
-    unclaimed = claimed < 0
-    if good_for_cells[k]:
-        owner[at] = k
-    elif in_table[k]:
-        owner[at[unclaimed | ~in_table[np.maximum(claimed, 0)]]] = k
-    else:
-        owner[at[unclaimed]] = k
+tubule_by_name = {name: k for k, name in enumerate(tubule_names)}
+by_id = np.argsort([int(name) for name in tubule_names])
 
+
+def assign_owner(transcript_xy):
+    """His rule for a transcript in more than one outline; tubules are taken in order of their id."""
+    owner = np.full(len(transcript_xy), -1, dtype=np.int32)
+    for k in by_id:
+        x0, y0, x1, y1 = tubules_um[tubule_names[k]].bounds
+        in_box = np.flatnonzero((transcript_xy[:, 0] >= x0) & (transcript_xy[:, 0] <= x1)
+                                & (transcript_xy[:, 1] >= y0) & (transcript_xy[:, 1] <= y1))
+        at = in_box[shapely.intersects_xy(tubules_um[tubule_names[k]], transcript_xy[in_box, 0], transcript_xy[in_box, 1])]
+        claimed = owner[at]
+        unclaimed = claimed < 0
+        if good_for_cells[k]:
+            owner[at] = k
+        elif in_table[k]:
+            owner[at[unclaimed | ~in_table[np.maximum(claimed, 0)]]] = k
+        else:
+            owner[at[unclaimed]] = k
+    return owner
+
+
+# The points are a dask frame: one partition at a time is read, counted and dropped, so the section's
+# transcripts are never all in memory. A transcript's owner depends on no other transcript, and the
+# counts only add, so the partitions can be taken independently.
 counts_by_compartment = {key: np.zeros((len(tubule_order), adata.n_vars, N_BINS)) for key in ["all", "intra", "extra"]}
-for i, tubule_id in enumerate(tubule_order):
-    mine = np.flatnonzero(owner == tubule_names.index(tubule_id))
-    position = radial_position_fast(transcript_xy[mine], tubules_um[tubule_id])
-    transcript_bin = np.clip(np.searchsorted(bin_edges, position, side="left") - 1, 0, N_BINS - 1)
-    flat = transcript_gene[mine] * N_BINS + transcript_bin
-    for key, chosen in [("all", slice(None)), ("intra", transcript_in_cell[mine]), ("extra", ~transcript_in_cell[mine])]:
-        counts_by_compartment[key][i] = np.bincount(flat[chosen], minlength=adata.n_vars * N_BINS).reshape(adata.n_vars, N_BINS)
+n_transcripts = n_owned = n_in_cell = 0
+for part in range(points.npartitions):
+    chunk = points.get_partition(part)[["x", "y", "gene", "cell_id"]].compute()
+    gene_column = chunk["gene"].astype(str).map(gene_index)       # NaN for the blank codewords
+    is_real = gene_column.notna().to_numpy()
+    transcript_xy = chunk.loc[is_real, ["x", "y"]].to_numpy()
+    transcript_gene = gene_column[is_real].to_numpy().astype(np.int64)
+    transcript_in_cell = chunk.loc[is_real, "cell_id"].to_numpy() >= 0        # -1 is a transcript in no cell
+    del chunk, gene_column
+
+    owner = assign_owner(transcript_xy)
+    n_transcripts += len(transcript_xy)
+    n_owned += int((owner >= 0).sum())
+    n_in_cell += int(transcript_in_cell.sum())
+    for i, tubule_id in enumerate(tubule_order):
+        mine = np.flatnonzero(owner == tubule_by_name[tubule_id])
+        if not len(mine):
+            continue
+        position = radial_position_fast(transcript_xy[mine], tubules_um[tubule_id])
+        transcript_bin = np.clip(np.searchsorted(bin_edges, position, side="left") - 1, 0, N_BINS - 1)
+        flat = transcript_gene[mine] * N_BINS + transcript_bin
+        for key, chosen in [("all", slice(None)), ("intra", transcript_in_cell[mine]), ("extra", ~transcript_in_cell[mine])]:
+            counts_by_compartment[key][i] += np.bincount(flat[chosen], minlength=adata.n_vars * N_BINS).reshape(adata.n_vars, N_BINS)
 tube_gene_bin = counts_by_compartment["all"]
 
 stage_by_tubule = stage_of.loc[tubule_order].to_numpy()
 per_tubule = tube_gene_bin.sum(axis=(1, 2))
-print(f"{len(transcript_xy):,} transcripts of the panel's genes; {(owner >= 0).sum():,} ({(owner >= 0).mean():.1%}) are in a tubule, "
+print(f"{n_transcripts:,} transcripts of the panel's genes; {n_owned:,} ({n_owned / n_transcripts:.1%}) are in a tubule, "
       f"{per_tubule.sum():,.0f} of them in the {len(tubule_order)} staged ones")
-print(f"{transcript_in_cell.mean():.1%} of the transcripts are inside a cell and {1 - transcript_in_cell.mean():.1%} outside any")
+print(f"{n_in_cell / n_transcripts:.1%} of the transcripts are inside a cell and {1 - n_in_cell / n_transcripts:.1%} outside any")
 print(f"per staged tubule: min {per_tubule.min():,.0f}, median {np.median(per_tubule):,.0f}, max {per_tubule.max():,.0f}")
 ```
 
