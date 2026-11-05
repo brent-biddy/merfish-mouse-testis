@@ -27,10 +27,14 @@ import scanpy as sc
 import spatialdata as sd
 import numpy as np
 import pandas as pd
+import numba
+import shapely
 from matplotlib.collections import PolyCollection
-from scipy.stats import kruskal, rankdata
+from scipy.ndimage import gaussian_filter
+from scipy.stats import kruskal, rankdata, spearmanr
 from shapely.affinity import affine_transform
 from shapely.geometry import Polygon
+from shapely import get_parts, get_type_id, linestrings
 from spatialdata.transformations import get_transformation
 
 # Cells under this many transcripts are dropped before dimension reduction (C1).
@@ -60,12 +64,28 @@ TUBULE_FLAGS = {
 }
 TUBULE_NAVY = "#10105a"
 
-# Phase G: the four stage groups of his computational staging, in order, and the colours they are
+# Phase F: the four stage groups of his computational staging, in order, and the colours they are
 # drawn in. Cells are coloured by the stage of the tubule they are in.
 STAGES = [1, 2, 3, 4]
 STAGE_COLORS = {1: "#56B4E9", 2: "#009E73", 3: "#F0E442", 4: "#D55E00"}
 STAGE_CELL_COLORS = {**{f"stage {s}": c for s, c in STAGE_COLORS.items()},
                      "unstaged tubule": "#c8c8c8", "outside tubules": "#e6e6e6"}
+# The continuous stage is an angle on a ring, so it is drawn with a cyclic colormap: the end of
+# stage group 4 meets the start of group 1.
+PHASE_CMAP = "twilight"
+
+# Phase G: a tubule's radial position is binned into this many bins of equal area, and the
+# heatmaps are smoothed with a Gaussian that wraps across tubules (they sit on a ring) and
+# reflects across bins: sigma in tubules, then in bins.
+N_BINS = 50
+RADIAL_SIGMA = (2, 1.5)
+DENSITY_TYPES = ["SPG", "Scytes", "STids", "Elongating", "Sertoli", "Leydig"]
+# One marker gene for each layer, the panel gene most specific to its type in Green's reference.
+MARKER_GENES = {"SPG": "Stra8", "Scytes": "Ccna1", "STids": "Acrv1", "Elongating": "Prm1", "Sertoli": "Amhr2"}
+# His library size: every tubule's counts are rescaled to this total before they are compared.
+TUBE_LIBRARY_SIZE = 1e6
+# A gene needs this many transcripts in the staged tubules to be drawn among all genes; fewer is noise.
+MIN_GENE_TRANSCRIPTS = 500
 
 # Phase D6: the twelve germ-cell types, coloured along one ramp so neighbours look alike.
 GC_TYPES = [f"GC{i}" for i in range(1, 13)]
@@ -229,23 +249,168 @@ def draw_staged_tubules(ax, polygons, colors, staged, halo):
                 lw=1.8 if is_staged else 0.7, zorder=3 if is_staged else 2, path_effects=effects)
 
 
-def plot_stage_outlines(image, polygons, stage_colors, staged, xy, gc_points, gc_order, stage_counts, n_unstaged, sample):
-    """G2: DAPI and the germ-cell type calls, each with the tubule outlines coloured by stage."""
+def add_phase_colorbar(fig, axes, cuts):
+    """A horizontal colorbar for the stage angle, 0 to 2 pi, with the stage groups marked.
+
+    Long ticks are the cuts between groups, and each group is named at the middle of its span. The
+    bar starts where group 1 does and ends where it wraps round to it.
+    """
+    bar = fig.colorbar(plt.cm.ScalarMappable(plt.Normalize(0, 2 * np.pi), PHASE_CMAP), ax=axes,
+                       location="bottom", shrink=0.6, aspect=40, pad=0.04)
+    spans = np.r_[0, cuts, 2 * np.pi]
+    bar.set_ticks(spans)
+    bar.ax.set_xticklabels([])
+    bar.ax.set_xticks((spans[:-1] + spans[1:]) / 2, [f"stage {s}" for s in STAGES], minor=True)
+    bar.ax.tick_params(which="minor", length=0)
+    bar.set_label("position on the stage ring (0 = start of stage 1, 2π = back to it)")
+    return bar
+
+
+def plot_stage_outlines(image, polygons, stage_colors, phase_colors, cuts, staged, xy, gc_points, gc_order,
+                        stage_counts, n_unstaged, sample):
+    """F2: DAPI and the germ-cell type calls with the outlines coloured by stage, then DAPI again by the continuous stage."""
     array, extent, (lo, hi) = image
     window = dict(xlim=(xy[:, 0].min(), xy[:, 0].max()), ylim=(xy[:, 1].max(), xy[:, 1].min()))
-    fig, axes = plt.subplots(1, 2, figsize=(20, 8.6), constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(27, 8.6), constrained_layout=True)
     axes[0].imshow(array, cmap="gray", vmin=lo, vmax=hi, extent=extent)
     draw_staged_tubules(axes[0], polygons, stage_colors, staged, halo=False)
     axes[0].set(title=f"{sample}: DAPI, tubules by stage")
     axes[1].scatter(xy[gc_order, 0], xy[gc_order, 1], c=gc_points[gc_order], s=0.5, linewidths=0, rasterized=True)
     draw_staged_tubules(axes[1], polygons, stage_colors, staged, halo=True)
     axes[1].set(title="germ-cell type, tubules by stage")
+    axes[2].imshow(array, cmap="gray", vmin=lo, vmax=hi, extent=extent)
+    draw_staged_tubules(axes[2], polygons, phase_colors, staged, halo=False)
+    axes[2].set(title="DAPI, tubules by position on the stage ring")
+    add_phase_colorbar(fig, axes[2], cuts)
     for ax in axes:
         ax.set(xlabel="x (µm)", ylabel="y (µm)", **window)
         ax.set_aspect("equal")
     handles = [plt.Line2D([], [], color=STAGE_COLORS[s], lw=3, label=f"stage {s} ({stage_counts[s]})") for s in STAGES]
     handles.append(plt.Line2D([], [], color="#8a8a8a", lw=1, label=f"not staged ({n_unstaged})"))
     legend_under(axes[0], handles, 5)
+    return fig
+
+
+def plot_phase_cells(umap, xy, cell_phase, cuts, sample):
+    """F3: each cell coloured by its tubule's position on the stage ring, on the UMAP and the tissue.
+
+    `cell_phase` is NaN for a cell outside every tubule or in an unstaged one: those are grey and
+    drawn first, so the staged cells are on top.
+    """
+    has_phase = ~np.isnan(cell_phase)
+    order = np.r_[np.flatnonzero(~has_phase), np.random.default_rng(0).permutation(np.flatnonzero(has_phase))]
+    fig, axes = plt.subplots(1, 2, figsize=(13.2, 7.0), constrained_layout=True)
+    for ax, points in zip(axes, (umap, xy)):
+        grey = order[~has_phase[order]]
+        staged = order[has_phase[order]]
+        ax.scatter(points[grey, 0], points[grey, 1], c="#d9d9d9", s=0.4, linewidths=0, rasterized=True)
+        ax.scatter(points[staged, 0], points[staged, 1], c=cell_phase[staged], cmap=PHASE_CMAP,
+                   vmin=0, vmax=2 * np.pi, s=0.4, linewidths=0, rasterized=True)
+    axes[0].set(title=f"{sample}: position on the stage ring, UMAP", xticks=[], yticks=[])
+    axes[1].set(title="on tissue", xlabel="x (µm)", ylabel="y (µm)", xlim=(xy[:, 0].min(), xy[:, 0].max()),
+                ylim=(xy[:, 1].max(), xy[:, 1].min()))
+    axes[1].set_aspect("equal")
+    add_phase_colorbar(fig, list(axes), cuts)
+    return fig
+
+
+def plot_density_heatmaps(density, smoothed, types, stage_per_tubule, sample, n_bins, sigma):
+    """G2: one heatmap per cell type, tubules along x in ring order and radial bins up from the middle.
+    Top row the density as counted, bottom row smoothed; each panel runs from 0 to its own 99th percentile."""
+    n_tubules = density.shape[1]
+    fig, axes = plt.subplots(2, len(types), figsize=(4.2 * len(types), 8), constrained_layout=True)
+    rows = [(density, "cells per 10,000 µm²"),
+            (smoothed, f"smoothed (σ = {sigma[0]} tubules wrapping, {sigma[1]} bins)")]
+    tick_bins = [0, n_bins // 4, n_bins // 2, 3 * n_bins // 4, n_bins]
+    for row, (arr, title) in enumerate(rows):
+        for k, name in enumerate(types):
+            ax = axes[row, k]
+            im = ax.imshow(arr[k].T, origin="lower", aspect="auto", cmap="magma", vmin=0,
+                           vmax=np.percentile(arr[k], 99), extent=(-0.5, n_tubules - 0.5, 0, n_bins))
+            ax.set_title(name + (f"\n{title}" if k == 0 else ""), fontsize=9)
+            ax.set_yticks(tick_bins, [f"{b}\n({np.sqrt(b / n_bins):.2f})" for b in tick_bins], fontsize=7)
+            if k == 0:
+                ax.set_ylabel("equal-area bin (radial_pos)\ncentre → wall")
+            for stage in STAGES:
+                at = np.flatnonzero(stage_per_tubule == stage)
+                ax.plot([at.min() - 0.5, at.max() + 0.5], [n_bins * 1.03] * 2, color=STAGE_COLORS[stage], lw=6,
+                        clip_on=False, solid_capstyle="butt")
+            plt.colorbar(im, ax=ax, shrink=0.7, pad=0.01)
+            if row == 1:
+                ax.set_xlabel("tubules, around the cycle")
+    fig.suptitle(f"{sample}: cell-type density by radial bin, {n_tubules} staged tubules", fontsize=12)
+    return fig
+
+
+def stage_bar(ax, stage_per_tubule, top):
+    """Mark the four stage groups above a heatmap whose tubules run along x."""
+    for stage in STAGES:
+        at = np.flatnonzero(stage_per_tubule == stage)
+        ax.plot([at.min() - 0.5, at.max() + 0.5], [top] * 2, color=STAGE_COLORS[stage], lw=6,
+                clip_on=False, solid_capstyle="butt")
+
+
+def plot_total_transcripts(panels, stage_per_tubule, sample, n_bins):
+    """G4: total transcripts by radial bin, one heatmap per (array, title), tubules along x in ring order."""
+    fig, axes = plt.subplots(1, len(panels), figsize=(5 * len(panels), 4.6), constrained_layout=True)
+    for ax, (arr, title) in zip(axes, panels):
+        im = ax.imshow(arr.T, origin="lower", aspect="auto", cmap="coolwarm",
+                       extent=(-0.5, arr.shape[0] - 0.5, 0, n_bins))
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("tubules, around the cycle")
+        ax.set_yticks([0, n_bins // 2, n_bins], ["0\n(centre)", str(n_bins // 2), f"{n_bins}\n(wall)"], fontsize=8)
+        stage_bar(ax, stage_per_tubule, n_bins * 1.03)
+        plt.colorbar(im, ax=ax, shrink=0.8, pad=0.01)
+    axes[0].set_ylabel("equal-area radial bin")
+    fig.suptitle(f"{sample}: total transcripts by radial bin, {len(stage_per_tubule)} staged tubules", fontsize=12)
+    return fig
+
+
+def plot_gene_heatmaps(by_row, genes, stage_per_tubule, sample, n_bins, sigma):
+    """G5: one heatmap per marker gene, tubules along x in ring order and radial bins up from the middle.
+    `by_row` is the unsmoothed then the smoothed list of tubules-by-bins arrays, one per entry of `genes`, which
+    are (title, gene index) pairs. Top row normalized to an equal total per tubule, bottom row smoothed; each
+    panel has its own colour scale."""
+    fig, axes = plt.subplots(2, len(genes), figsize=(4.4 * len(genes), 7.6), constrained_layout=True)
+    rows = list(zip(by_row, ["normalized to equal total, unsmoothed",
+                             f"smoothed σ = ({sigma[0]:.0f}, {sigma[1]}), wrap / reflect"]))
+    for row, (arrays, note) in enumerate(rows):
+        for k, ((title, _), arr) in enumerate(zip(genes, arrays)):
+            ax = axes[row, k]
+            im = ax.imshow(arr.T, origin="lower", aspect="auto", cmap="coolwarm",
+                           extent=(-0.5, arr.shape[0] - 0.5, 0, n_bins))
+            ax.set_title(title + (f"\n{note}" if k == 0 else ""), fontsize=9)
+            ax.set_yticks([0, n_bins // 2, n_bins], ["0\n(centre)", str(n_bins // 2), f"{n_bins}\n(wall)"], fontsize=7)
+            stage_bar(ax, stage_per_tubule, n_bins * 1.03)
+            plt.colorbar(im, ax=ax, shrink=0.7, pad=0.01)
+            if k == 0:
+                ax.set_ylabel("equal-area radial bin")
+            if row == 1:
+                ax.set_xlabel("tubules, around the cycle")
+    fig.suptitle(f"{sample}: transcripts by radial bin, {len(stage_per_tubule)} staged tubules", fontsize=12)
+    return fig
+
+
+def plot_all_genes(by_compartment, order, names, marked, xlabel, title, stage_per_tubule=None):
+    """G6, G7: every gene as one row, one heatmap per compartment with the same gene order, each row on its own
+    z-score scale. `by_compartment` maps "all", "intra" and "extra" to a genes-by-columns array already in `order`."""
+    fig, axes = plt.subplots(1, 3, figsize=(16, 13), constrained_layout=True, sharey=True)
+    for ax, (key, label) in zip(axes, [("all", "all transcripts"), ("intra", "inside a cell"), ("extra", "outside any cell")]):
+        arr = by_compartment[key]
+        spread = arr.std(axis=1, keepdims=True)
+        z = np.where(spread > 0, (arr - arr.mean(axis=1, keepdims=True)) / np.where(spread > 0, spread, 1), 0)
+        im = ax.imshow(z, aspect="auto", cmap="coolwarm", vmin=-3, vmax=3, interpolation="nearest",
+                       extent=(-0.5, z.shape[1] - 0.5, len(order) - 0.5, -0.5))
+        ax.set_title(label, fontsize=10)
+        ax.set_xlabel(xlabel)
+        if stage_per_tubule is not None:
+            stage_bar(ax, stage_per_tubule, -6)
+            ax.set_ylim(len(order) - 0.5, -12)
+    shown = [i for i, gene in enumerate(names[order]) if gene in marked]
+    axes[0].set_yticks(shown, [names[order][i] for i in shown], fontsize=8)
+    axes[0].set_ylabel(f"{len(order)} genes, sorted by where they peak")
+    fig.colorbar(im, ax=axes, shrink=0.35, label="row z-score")
+    fig.suptitle(title, fontsize=12)
     return fig
 
 
@@ -270,7 +435,7 @@ def plot_stage_composition(mean_types, mean_gc, n_per_stage, sample):
 This notebook is a demo of what the section's data holds. It loads one section's table, reduces
 it to a UMAP, calls every cell's major type and the germ cells' subtype against two published
 references, and draws those calls on the UMAP and on the tissue. It then draws Alex Vargo's tubule outlines over the
-same image and calls, and the stage he gave each tubule. It reports no quality metrics and makes no tubule or stage calls of its own.
+same image and calls, the stage he gave each tubule, where each cell sits between the middle of its tubule and the wall, and how the cell types and the transcripts are spread across that radius. It reports no quality metrics and makes no tubule or stage calls of its own.
 
 ## B1. Load the section
 
@@ -604,7 +769,7 @@ print(f"{in_tubule.sum():,} of {adata.n_obs:,} cells are in a tubule ({in_tubule
 ```
 
 
-# Phase G — Tubule stage
+# Phase F — Tubule stage
 
 Each tubule cross-section sits at one point of the cycle of the seminiferous epithelium. The stage
 used here is Alex Vargo's computational one: each tubule's radial gene profile is placed on a ring
@@ -612,15 +777,15 @@ by a principal component analysis across all sixteen sections, and the ring is c
 groups, 1 to 4. It is made only for the tubules he flagged as good circles, so the others have no
 stage. His cutoffs were fit to his stage calls made by eye, which agree with these to within one group.
 
-## G1. The stage of each tubule
+## F1. The stage of each tubule
 
 His table covers every section, so the section's rows are picked by the name his files carry, the
 part of the metadata file's name before `-tubule-metadata`.
 
 ```{python}
 section = TUBULE_META.name.split("-tubule-metadata")[0]
-stage_table = pd.read_csv(TUBULE_ORDER)
-stage_table = stage_table[stage_table["samp"] == section]
+order_all = pd.read_csv(TUBULE_ORDER)
+stage_table = order_all[order_all["samp"] == section].copy()
 assert len(stage_table), f"{TUBULE_ORDER.name} has no rows for {section}"
 
 stage_table["tube_id"] = stage_table["tube_id"].astype(int).astype(str)
@@ -632,21 +797,50 @@ print(f"{section}: {len(stage_of)} of {len(tubules_um)} tubules are staged")
 print(stage_counts.rename(lambda s: f"stage {s}").to_string())
 ```
 
-## G2. The tubules by stage
+The groups are cut from a continuous variable, the tubule's angle on the ring. The ring has no
+natural start, so the angle is turned into a position that begins where stage group 1 does:
+`ring_start` is the angle of the tubule his table ranks first across all sixteen sections. His
+ranks rise as the angle falls, so the position is how far round the ring, in that direction, a
+tubule is from the start, from 0 to 2π. The cuts are halfway between the last tubule of one group
+and the first of the next.
+
+```{python}
+ring_start = order_all.loc[order_all["order"] == 0, "ang"].iat[0]
+phase = pd.Series((ring_start - stage_table["ang"].to_numpy()) % (2 * np.pi), index=stage_table["tube_id"])
+
+rho = spearmanr(phase, stage_table["order"]).statistic
+assert rho > 0.95, f"position on the ring does not follow his order (rho = {rho:.2f})"
+
+span = phase.groupby(stage_of).agg(["min", "max"]).reindex(STAGES)
+cuts = ((span["max"].to_numpy()[:-1] + span["min"].to_numpy()[1:]) / 2)
+print(f"ring starts at {ring_start:.3f} rad; rank correlation with his order {rho:.3f}")
+print(span.round(2).rename(index=lambda s: f"stage {s}").to_string())
+print("cuts at " + ", ".join(f"{c:.2f}" for c in cuts))
+```
+
+## F2. The tubules by stage
 
 The staged tubules are drawn thick in their stage's colour and the others thin and grey, on DAPI and
 over the germ-cell type calls. Tubules at one stage tend to lie together, which is the order of the
 section and not something the stage was built from.
 
+The third panel draws the same tubules by their position on the ring instead of their group. The
+colormap is cyclic because the cycle is: the end of group 4 is the start of group 1. The long ticks
+on the bar are the cuts between groups. Neighbouring tubules at neighbouring colours are a gradient
+across the section, and a group whose tubules sit at both ends of the bar, or a colour jump inside
+one group, marks where a cut falls in the continuous variable.
+
 ```{python}
+phase_colors = {i: plt.get_cmap(PHASE_CMAP)(p / (2 * np.pi)) for i, p in phase.items()}
+
 plot_stage_outlines(
-    TISSUE_IMAGE, tubules_um, {i: STAGE_COLORS[s] for i, s in stage_of.items()}, set(stage_of.index),
-    tissue_xy, gc_points, gc_order, stage_counts, len(tubules_um) - len(stage_of), SAMPLE,
+    TISSUE_IMAGE, tubules_um, {i: STAGE_COLORS[s] for i, s in stage_of.items()}, phase_colors, cuts,
+    set(stage_of.index), tissue_xy, gc_points, gc_order, stage_counts, len(tubules_um) - len(stage_of), SAMPLE,
 )
 plt.show()
 ```
 
-## G3. Stage on the UMAP and the tissue
+## F3. Stage on the UMAP and the tissue
 
 Each cell takes the stage of the tubule it is in. Cells in a tubule with no stage, and cells outside
 every tubule, are grey and drawn first, so the staged cells are on top. The UMAP shows whether the
@@ -666,6 +860,309 @@ plot_calls(umap, tissue_xy, stage_calls, STAGE_CELL_COLORS, SAMPLE, "tubule stag
            last=[f"stage {s}" for s in STAGES], image=TISSUE_IMAGE, legend_cols=6)
 plt.show()
 print(stage_calls.value_counts().reindex(STAGE_CELL_COLORS).to_string())
+```
+
+The same cells by position on the ring, so the UMAP shows whether the germ-cell arc is graded
+along it and not only split into four blocks. Cells outside every tubule and in unstaged ones are grey.
+
+```{python}
+cell_phase = adata.obs["tubule_id"].map(phase).to_numpy(dtype=float)
+
+plot_phase_cells(umap, tissue_xy, cell_phase, cuts, SAMPLE)
+plt.show()
+print(f"{np.isfinite(cell_phase).sum():,} of {len(cell_phase):,} cells are in a staged tubule")
+```
+
+
+# Phase G — Radial position
+
+Where a cell sits between the middle of its tubule and the wall, by Alex Vargo's definition
+(`radialTubule.create_tubule_transcript_polar_info`). It needs only his outlines and the cells, so
+every cell in a tubule gets one, staged or not.
+
+## G1. Radial position of every cell
+
+`rad` is the distance from the outline's centroid to the cell. `dist_to_edge` comes from a ray cast
+from the cell, outward along its angle from the centroid, for the length of the outline's bounding-box
+diagonal: it is the length of the part of that ray inside the outline, and where the ray leaves and
+re-enters, the distance to the farthest crossing. A cell that is not strictly inside the outline, one on
+its boundary too, gets 0. The position is `radial_pos = rad / (rad + dist_to_edge)`, which is 0 at the
+centroid and 1 at the wall. The ray is cast from the cell, so nothing assumes the outline is star-shaped.
+
+```{python}
+def radial_position(xy, polygon):
+    """His (rad, dist_to_edge, inside) for an (n, 2) array of micrometre points and one outline."""
+    centroid = polygon.centroid
+    x0, y0, x1, y1 = polygon.bounds
+    reach = np.hypot(x1 - x0, y1 - y0)
+    angle = np.arctan2(xy[:, 1] - centroid.y, xy[:, 0] - centroid.x)
+    rad = np.hypot(xy[:, 0] - centroid.x, xy[:, 1] - centroid.y)
+    inside = shapely.contains_xy(polygon, xy[:, 0], xy[:, 1])
+    dist_to_edge = np.zeros(len(xy))
+    at = np.flatnonzero(inside)
+    if len(at):
+        ends = xy[at] + reach * np.c_[np.cos(angle[at]), np.sin(angle[at])]
+        hits = shapely.intersection(polygon, linestrings(np.stack([xy[at], ends], axis=1)))
+        kind = get_type_id(hits)
+        single = (kind == 0) | (kind == 1)              # a point or one line
+        dist_to_edge[at[single]] = shapely.length(hits[single])
+        for k in np.flatnonzero(~single):               # several pieces: the farthest crossing
+            coords = np.concatenate([np.asarray(g.coords) for g in get_parts(hits[k]) if g.geom_type == "LineString"])
+            dist_to_edge[at[k]] = np.hypot(*(coords - xy[at[k]]).T).max()
+    return rad, dist_to_edge, inside
+
+
+adata.obs["radial_pos"] = np.nan
+n_outside = 0
+for tubule_id, rows in adata.obs.groupby("tubule_id").indices.items():
+    if tubule_id == "":
+        continue
+    rad, dist_to_edge, inside = radial_position(tissue_xy[rows], tubules_um[tubule_id])
+    adata.obs.iloc[rows, adata.obs.columns.get_loc("radial_pos")] = rad / (rad + dist_to_edge)
+    n_outside += (~inside).sum()
+
+has_position = adata.obs["radial_pos"].notna()
+print(f"{has_position.sum():,} cells have a radial position; {n_outside} are not strictly inside their own outline and sit at 1")
+```
+
+## G2. Cell-type density by radial position
+
+The cells of each type counted into 50 bins of equal area, with edges at the square root of k over 50, so
+that a bin holds the same share of a tubule's area whatever its size. The density is the count over the
+bin's area, which is the outline's area over 50, in cells per 10,000 µm². It is kept as a density, and not
+rescaled to the same total for each tubule, so that a tubule that is more crowded stays more crowded. Only
+the staged tubules are drawn, along x in their order on the stage ring, with the stage groups marked above.
+
+The smoothing is a Gaussian over tubules and bins, wrapping across tubules because the ring closes, so
+the first tubule is the neighbour of the last, and reflecting across bins. The top row is the density as
+counted. A bin holds only a handful of cells, so it is noisy, and the bottom row is for reading the trend.
+
+```{python}
+bin_edges = np.sqrt(np.arange(N_BINS + 1) / N_BINS)
+tubule_order = [t for t in phase.sort_values().index if t in stage_of.index]
+position_of = {t: i for i, t in enumerate(tubule_order)}
+tubule_area = np.array([tubules_um[t].area for t in tubule_order])
+
+placed = adata.obs.loc[has_position & adata.obs["tubule_id"].isin(position_of), ["tubule_id", "cell_type", "radial_pos"]]
+radial_bin = np.clip(np.searchsorted(bin_edges, placed["radial_pos"].to_numpy(), side="left") - 1, 0, N_BINS - 1)
+
+counts = np.zeros((len(DENSITY_TYPES), len(tubule_order), N_BINS))
+for k, name in enumerate(DENSITY_TYPES):
+    of_type = (placed["cell_type"] == name).to_numpy()
+    np.add.at(counts[k], (placed["tubule_id"][of_type].map(position_of).to_numpy(), radial_bin[of_type]), 1)
+
+density = counts / (tubule_area[None, :, None] / N_BINS) * 1e4
+smoothed = np.stack([gaussian_filter(panel, sigma=RADIAL_SIGMA, mode=("wrap", "reflect")) for panel in density])
+
+plot_density_heatmaps(density, smoothed, DENSITY_TYPES, stage_of.loc[tubule_order].to_numpy(), SAMPLE, N_BINS, RADIAL_SIGMA)
+plt.show()
+print(f"{len(tubule_order)} staged tubules; a bin covers {np.median(tubule_area) / N_BINS:,.0f} µm² at the median")
+print(pd.Series(counts.sum(axis=(1, 2)), index=DENSITY_TYPES).astype(int).to_string())
+```
+
+
+## G3. Transcripts in each tubule, by radial position
+
+The transcripts of the section, from the store's points, with the blank codewords dropped. Each is put in
+the tubule whose outline contains it, boundary included, and then given the same radial position as a
+cell. A transcript can fall in two outlines, and which tubule keeps it follows his rule
+(`xscript-to-tubule-assignment.py`): tubules are taken in order of their id; a tubule gets every transcript in
+its outline that no one has claimed; a tubule he flagged good for cells also takes every transcript another
+tubule claimed earlier; a tubule that is in his table but not good takes only those claimed by a tubule that is
+not in his table; and a tubule not in his table takes only unclaimed ones. The counts are kept as tubules by
+genes by bins, for the staged tubules, in three compartments: all transcripts, those inside a cell (the store
+gives each transcript the cell it falls in, or none) and those outside any cell.
+
+The ray that gives each transcript its distance to the wall is the same as for cells, but the farthest
+crossing of the ray with the outline is found directly, one outline edge at a time. That is the length of the
+one piece the ray cuts from the outline, or the farthest coordinate where it cuts several, so it gives the
+same `dist_to_edge` as G1 to within 1e-11 µm and is fast enough for twelve million transcripts.
+
+```{python}
+@numba.njit(parallel=True)
+def farthest_crossing(px, py, dx, dy, reach, ax, ay, bx, by):
+    """For each point, the largest distance along its ray (dx, dy) to a crossing of the edges a -> b, up to `reach`."""
+    out = np.zeros(px.shape[0])
+    for i in numba.prange(px.shape[0]):
+        best = 0.0
+        for j in range(ax.shape[0]):
+            ex, ey = bx[j] - ax[j], by[j] - ay[j]
+            den = dx[i] * ey - dy[i] * ex
+            if den == 0.0:
+                continue
+            wx, wy = ax[j] - px[i], ay[j] - py[i]
+            t = (wx * ey - wy * ex) / den
+            u = (wx * dy[i] - wy * dx[i]) / den
+            if t > 0.0 and t <= reach and u >= 0.0 and u < 1.0 and t > best:
+                best = t
+        out[i] = best
+    return out
+
+
+def radial_position_fast(xy, polygon):
+    """G1's radial position for many points: the same ray, with the farthest crossing found by `farthest_crossing`."""
+    centroid = polygon.centroid
+    x0, y0, x1, y1 = polygon.bounds
+    angle = np.arctan2(xy[:, 1] - centroid.y, xy[:, 0] - centroid.x)
+    rad = np.hypot(xy[:, 0] - centroid.x, xy[:, 1] - centroid.y)
+    inside = shapely.contains_xy(polygon, xy[:, 0], xy[:, 1])
+    corners = np.asarray(polygon.exterior.coords)
+    dist_to_edge = np.zeros(len(xy))
+    at = np.flatnonzero(inside)
+    if len(at):
+        dist_to_edge[at] = farthest_crossing(
+            np.ascontiguousarray(xy[at, 0]), np.ascontiguousarray(xy[at, 1]), np.cos(angle[at]), np.sin(angle[at]),
+            float(np.hypot(x1 - x0, y1 - y0)), corners[:-1, 0].copy(), corners[:-1, 1].copy(),
+            corners[1:, 0].copy(), corners[1:, 1].copy())
+    return rad / (rad + dist_to_edge)
+
+
+(points_name,) = sdata.points
+transcripts = sdata.points[points_name][["x", "y", "gene", "cell_id"]].compute()
+gene_column = transcripts["gene"].astype(str).map(pd.Series(np.arange(adata.n_vars), index=adata.var_names))
+is_real = gene_column.notna().to_numpy()
+transcript_xy = transcripts.loc[is_real, ["x", "y"]].to_numpy()
+transcript_gene = gene_column[is_real].to_numpy().astype(np.int64)
+transcript_in_cell = transcripts.loc[is_real, "cell_id"].to_numpy() >= 0        # -1 is a transcript in no cell
+del transcripts
+
+# Which outlines contain each transcript, boundary included.
+tubule_names = list(tubules_um)
+contained = {}
+for name in tubule_names:
+    x0, y0, x1, y1 = tubules_um[name].bounds
+    in_box = np.flatnonzero((transcript_xy[:, 0] >= x0) & (transcript_xy[:, 0] <= x1)
+                            & (transcript_xy[:, 1] >= y0) & (transcript_xy[:, 1] <= y1))
+    contained[name] = in_box[shapely.intersects_xy(tubules_um[name], transcript_xy[in_box, 0], transcript_xy[in_box, 1])]
+
+# His rule for a transcript in more than one outline; tubules are taken in order of their id.
+owner = np.full(len(transcript_xy), -1, dtype=np.int32)
+in_table = np.array([name in tubule_meta.index for name in tubule_names])
+good_for_cells = np.array([bool(tubule_meta.loc[name, "good_cells_bin"]) if name in tubule_meta.index else False
+                           for name in tubule_names])
+for k in np.argsort([int(name) for name in tubule_names]):
+    at = contained[tubule_names[k]]
+    claimed = owner[at]
+    unclaimed = claimed < 0
+    if good_for_cells[k]:
+        owner[at] = k
+    elif in_table[k]:
+        owner[at[unclaimed | ~in_table[np.maximum(claimed, 0)]]] = k
+    else:
+        owner[at[unclaimed]] = k
+
+counts_by_compartment = {key: np.zeros((len(tubule_order), adata.n_vars, N_BINS)) for key in ["all", "intra", "extra"]}
+for i, tubule_id in enumerate(tubule_order):
+    mine = np.flatnonzero(owner == tubule_names.index(tubule_id))
+    position = radial_position_fast(transcript_xy[mine], tubules_um[tubule_id])
+    transcript_bin = np.clip(np.searchsorted(bin_edges, position, side="left") - 1, 0, N_BINS - 1)
+    flat = transcript_gene[mine] * N_BINS + transcript_bin
+    for key, chosen in [("all", slice(None)), ("intra", transcript_in_cell[mine]), ("extra", ~transcript_in_cell[mine])]:
+        counts_by_compartment[key][i] = np.bincount(flat[chosen], minlength=adata.n_vars * N_BINS).reshape(adata.n_vars, N_BINS)
+tube_gene_bin = counts_by_compartment["all"]
+
+stage_by_tubule = stage_of.loc[tubule_order].to_numpy()
+per_tubule = tube_gene_bin.sum(axis=(1, 2))
+print(f"{len(transcript_xy):,} transcripts of the panel's genes; {(owner >= 0).sum():,} ({(owner >= 0).mean():.1%}) are in a tubule, "
+      f"{per_tubule.sum():,.0f} of them in the {len(tubule_order)} staged ones")
+print(f"{transcript_in_cell.mean():.1%} of the transcripts are inside a cell and {1 - transcript_in_cell.mean():.1%} outside any")
+print(f"per staged tubule: min {per_tubule.min():,.0f}, median {np.median(per_tubule):,.0f}, max {per_tubule.max():,.0f}")
+```
+
+## G4. Total transcripts by radial position
+
+All the panel's genes together. The first two panels are a density, transcripts per 1,000 µm² of the bin,
+which keeps real differences in how much a tubule holds. The third is his normalization: every tubule is
+rescaled to the same total, so only the shape across the radius is left. The smoothing is his, a Gaussian over
+tubules and bins whose width across tubules is `floor(n_tubules / 100 * 1.5)`, so 1 for 77 tubules, and 1.5 across
+bins, wrapping across tubules and reflecting across bins.
+
+```{python}
+GENE_SIGMA = (np.floor(len(tubule_order) / 100 * 1.5), 1.5)
+total_by_bin = tube_gene_bin.sum(axis=1)
+
+transcript_density = total_by_bin / (tubule_area[:, None] / N_BINS) * 1e3
+equal_total = total_by_bin * (TUBE_LIBRARY_SIZE / total_by_bin.sum(axis=1))[:, None]
+smooth = lambda arr: gaussian_filter(arr, sigma=GENE_SIGMA, mode=["wrap", "reflect"])
+
+plot_total_transcripts(
+    [(transcript_density, "transcripts per 1,000 µm²\nunsmoothed"),
+     (smooth(transcript_density), f"transcripts per 1,000 µm²\nsmoothed σ = ({GENE_SIGMA[0]:.0f}, {GENE_SIGMA[1]})"),
+     (smooth(equal_total), "his normalization: equal total per tubule\nsmoothed")],
+    stage_by_tubule, SAMPLE, N_BINS)
+plt.show()
+bands = {"centre (bins 0-9)": slice(0, 10), "middle (20-29)": slice(20, 30), "wall (40-49)": slice(40, 50)}
+print("median transcripts per 1,000 µm² by band: " + ", ".join(f"{k} {np.median(transcript_density[:, v]):,.0f}" for k, v in bands.items()))
+```
+
+## G5. Marker genes by radial position
+
+One marker for each layer. Each tubule's counts are rescaled to the same total, as in his
+`normalize_tube_counts_dict`, then each gene is smoothed as in his `smooth_tube_gene_bin`. Each panel is on its
+own colour scale. The tubules run along x in their order on the stage ring, so a layer that belongs to one part
+of the cycle shows as a blob there.
+
+```{python}
+equal_genes = tube_gene_bin * (TUBE_LIBRARY_SIZE / per_tubule)[:, None, None]
+gene_panels = [(f"{gene} ({layer})", adata.var_names.get_loc(gene)) for layer, gene in MARKER_GENES.items()]
+
+unsmoothed = [equal_genes[:, g, :] for _, g in gene_panels]
+smoothed_genes = [smooth(arr) for arr in unsmoothed]
+plot_gene_heatmaps([unsmoothed, smoothed_genes], gene_panels, stage_by_tubule, SAMPLE, N_BINS, GENE_SIGMA)
+plt.show()
+```
+
+
+## G6. Every gene across the radius
+
+All the genes at once, to look for spatial patterns not already known. Each gene is one row: its counts across
+the radial bins, averaged over the staged tubules. The counts are normalized and smoothed as in G5 and each
+compartment is scaled by the tubule's all-transcript factor, as in his notebook, so the inside and the outside
+add up to the total. Each row is then on its own z-score scale, and the genes are sorted by where their counts sit
+across the radius, from the lumen at the top to the wall at the bottom, in the order of the all-transcripts panel.
+Genes with fewer than `MIN_GENE_TRANSCRIPTS` transcripts in the staged tubules are left out.
+
+```{python}
+library_factor = TUBE_LIBRARY_SIZE / per_tubule
+smoothed_by_compartment = {
+    key: np.stack([smooth(counts[:, gene, :] * library_factor[:, None]) for gene in range(adata.n_vars)], axis=1)
+    for key, counts in counts_by_compartment.items()}
+
+drawn = np.flatnonzero(tube_gene_bin.sum(axis=(0, 2)) >= MIN_GENE_TRANSCRIPTS)
+gene_names = np.array(adata.var_names)[drawn]
+
+across_radius = {key: arr.mean(axis=0)[drawn] for key, arr in smoothed_by_compartment.items()}
+radial_weights = across_radius["all"]
+radius_order = np.argsort((radial_weights * np.arange(N_BINS)).sum(axis=1) / radial_weights.sum(axis=1))
+
+plot_all_genes({key: arr[radius_order] for key, arr in across_radius.items()}, radius_order, gene_names,
+               set(MARKER_GENES.values()), "equal-area radial bin (0 = centre, 49 = wall)",
+               f"{SAMPLE}: every gene across the radius, averaged over the {len(tubule_order)} staged tubules")
+plt.show()
+print(f"{len(drawn)} of {adata.n_vars} genes have at least {MIN_GENE_TRANSCRIPTS} transcripts in the staged tubules")
+```
+
+## G7. Every gene around the cycle
+
+The same for the cycle: each gene's counts across the tubules in their ring order, averaged over the radius.
+The genes are sorted by the angle at which their counts sit on the ring, so a gene that peaks at one part of the
+cycle falls on a diagonal. The ring has no natural start, so a gene that is high at both ends of the plot is one peak that wraps round,
+like the spermatocyte genes. A gene with two separate peaks sits between them in this order, so it can look like one
+with a broad peak.
+
+```{python}
+across_cycle = {key: arr.mean(axis=2).T[drawn] for key, arr in smoothed_by_compartment.items()}
+ring_angle = 2 * np.pi * np.arange(len(tubule_order)) / len(tubule_order)
+ring_weights = across_cycle["all"]
+ring_position = np.arctan2((ring_weights * np.sin(ring_angle)).sum(axis=1),
+                           (ring_weights * np.cos(ring_angle)).sum(axis=1)) % (2 * np.pi)
+cycle_order = np.argsort(ring_position)
+
+plot_all_genes({key: arr[cycle_order] for key, arr in across_cycle.items()}, cycle_order, gene_names,
+               set(MARKER_GENES.values()), "tubules, around the cycle (stage groups above)",
+               f"{SAMPLE}: every gene around the cycle, averaged over the radius, {len(tubule_order)} staged tubules",
+               stage_per_tubule=stage_by_tubule)
+plt.show()
 ```
 
 
