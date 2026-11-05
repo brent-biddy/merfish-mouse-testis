@@ -20,8 +20,7 @@ Brent Biddy
 - [Phase E — Tubules](#phase-e--tubules)
   - [E1. Load the outlines](#e1-load-the-outlines)
   - [E2. The tubules on the section](#e2-the-tubules-on-the-section)
-  - [E3. Tubules at full resolution](#e3-tubules-at-full-resolution)
-  - [E4. Which tubule each cell is in](#e4-which-tubule-each-cell-is-in)
+  - [E3. Which tubule each cell is in](#e3-which-tubule-each-cell-is-in)
 - [Phase G — Tubule stage](#phase-g--tubule-stage)
   - [G1. The stage of each tubule](#g1-the-stage-of-each-tubule)
   - [G2. The tubules by stage](#g2-the-tubules-by-stage)
@@ -218,7 +217,7 @@ def plot_tubule_overview(image, polygons, flag_colors, flag_counts, xy, major_po
 
 def plot_tubule_crop(channels, extent, outline, outline_color, cell_polygons, major_colors, gc_colors,
                      major_present, gc_present, title, width=24.0):
-    """E3: one tubule at full resolution: DAPI, Cellbound3, then the cells filled by type and by germ-cell type, over DAPI.
+    """H2: one tubule at full resolution: DAPI, Cellbound3, then the cells filled by type and by germ-cell type, over DAPI.
 
     The figure's height follows the crop's shape, so a thin strip does not leave empty space around it.
     """
@@ -765,92 +764,7 @@ plt.show()
 
 ![](section_analysis_files/figure-commonmark/cell-19-output-1.png)
 
-## E3. Tubules at full resolution
-
-One tubule per flag, so each kind of outline is seen against the tissue:
-for each flag, the tubule whose outline area is the median of that flag,
-and for the tubules without a table row, the first. A crop is read from
-the finest level of the image, a few tens of megabytes per channel, and
-the cells in it are filled by type. His outline is drawn in its flag
-colour on every panel.
-
-<details>
-<summary>Code</summary>
-
-``` python
-full = pyramid[levels[0]]["image"]
-cell_shapes = sdata.shapes[cells_name]
-cell_centres = cell_shapes.geometry.centroid
-area = tubule_meta["area"]
-
-
-def pick_tubule(flag):
-    ids = flags.index[flags == flag]
-    if flag == "no metadata":
-        return ids[0]
-    return area.loc[ids].sort_values().index[len(ids) // 2]
-
-
-def read_crop(tubule_id, pad=30):
-    """The tubule's bounding box, padded by `pad` µm, read from the finest image level."""
-    x0, y0, x1, y1 = tubules_um[tubule_id].bounds
-    corners = um_to_px @ np.array([[x0 - pad, x1 + pad], [y0 - pad, y1 + pad], [1, 1]])
-    px0, px1 = int(max(corners[0].min(), 0)), int(min(corners[0].max(), full.shape[2]))
-    py0, py1 = int(max(corners[1].min(), 0)), int(min(corners[1].max(), full.shape[1]))
-    (ex0, ex1), (ey0, ey1) = (px_to_um @ np.array([[px0, px1], [py0, py1], [1, 1]]))[:2]
-    channels = {c: full.sel(c=c).isel(y=slice(py0, py1), x=slice(px0, px1)).data.compute() for c in ["DAPI", "Cellbound3"]}
-    return channels, (ex0, ex1, ey1, ey0)
-
-
-def show_tubule(tubule_id, outline_color, label):
-    """Draw one tubule at full resolution, with its cells filled by type."""
-    channels, extent = read_crop(tubule_id)
-
-    # The cells whose centres are in view and that survived the filter in C1.
-    in_view = ((cell_centres.x > extent[0]) & (cell_centres.x < extent[1])
-               & (cell_centres.y > extent[3]) & (cell_centres.y < extent[2])).to_numpy()
-    in_table = cell_shapes.index[in_view].astype(str).isin(adata.obs_names)
-    ids = cell_shapes.index[in_view][in_table].astype(str)
-    parts = [(np.asarray(part.exterior.coords), cell_id)
-             for geometry, cell_id in zip(cell_shapes.geometry[in_view][in_table], ids) for part in geometry.geoms]
-    cell_polygons = [coords for coords, _ in parts]
-    major_here = [major_calls[cell_id] for _, cell_id in parts]
-    gc_here = [gc_calls[cell_id] for _, cell_id in parts]
-
-    plot_tubule_crop(
-        channels, extent, tubules_um[tubule_id], outline_color, cell_polygons,
-        [TYPE_COLORS[k] for k in major_here], [GC_COLORS[k] for k in gc_here], set(major_here), set(gc_here),
-        f"Tubule {tubule_id}: {label}   ({len(ids):,} cells from the table in view)",
-    )
-    plt.show()
-    print(f"tubule {tubule_id}, {label}: {channels['DAPI'].shape[1]} x {channels['DAPI'].shape[0]} px, "
-          f"{channels['DAPI'].nbytes / 1e6:.0f} MB per channel")
-
-
-for flag in TUBULE_FLAGS:
-    if flag_counts[flag]:
-        show_tubule(pick_tubule(flag), TUBULE_FLAGS[flag], flag)
-```
-
-</details>
-
-![](section_analysis_files/figure-commonmark/cell-20-output-1.png)
-
-    tubule 249, good circle: 3283 x 3110 px, 20 MB per channel
-
-![](section_analysis_files/figure-commonmark/cell-20-output-3.png)
-
-    tubule 122, good cells, not circular: 3870 x 4548 px, 35 MB per channel
-
-![](section_analysis_files/figure-commonmark/cell-20-output-5.png)
-
-    tubule 21, not good cells: 4755 x 3166 px, 30 MB per channel
-
-![](section_analysis_files/figure-commonmark/cell-20-output-7.png)
-
-    tubule 3, no metadata: 6525 x 1504 px, 20 MB per channel
-
-## E4. Which tubule each cell is in
+## E3. Which tubule each cell is in
 
 His map has one entry per cell of the section’s table, in the table’s
 order: a tubule id, or none for a cell outside every tubule. C1 dropped
@@ -941,7 +855,7 @@ plt.show()
 
 </details>
 
-![](section_analysis_files/figure-commonmark/cell-23-output-1.png)
+![](section_analysis_files/figure-commonmark/cell-22-output-1.png)
 
 ## G3. Stage on the UMAP and the tissue
 
@@ -971,7 +885,7 @@ print(stage_calls.value_counts().reindex(STAGE_CELL_COLORS).to_string())
 
 </details>
 
-![](section_analysis_files/figure-commonmark/cell-24-output-1.png)
+![](section_analysis_files/figure-commonmark/cell-23-output-1.png)
 
     tubule_id
     stage 1            10579
@@ -1067,7 +981,7 @@ plt.show()
     GC11            4.5     40.3     41.4      8.9   3.3e-11
     GC12           16.5      6.6     19.4     26.3   1.0e-11
 
-![](section_analysis_files/figure-commonmark/cell-25-output-2.png)
+![](section_analysis_files/figure-commonmark/cell-24-output-2.png)
 
 ## H2. One tubule per stage at full resolution
 
@@ -1075,8 +989,57 @@ The composition above is a mean, so here is a single tubule at each
 stage. It is the staged tubule whose germ-cell type shares are closest
 to the stage’s mean, by the sum of the absolute differences, so each is
 a typical tubule of its stage and not a clear one or an odd one. They
-illustrate the means and do not test them. Each panel set is the same as
-in E3, with the outline in the stage’s colour.
+illustrate the means and do not test them. A crop is read from the
+finest level of the image, a few tens of megabytes per channel. Its
+cells are filled by type, over DAPI and Cellbound3, and the outline is
+Alex Vargo’s, in the stage’s colour.
+
+<details>
+<summary>Code</summary>
+
+``` python
+full = pyramid[levels[0]]["image"]
+cell_shapes = sdata.shapes[cells_name]
+cell_centres = cell_shapes.geometry.centroid
+
+
+def read_crop(tubule_id, pad=30):
+    """The tubule's bounding box, padded by `pad` µm, read from the finest image level."""
+    x0, y0, x1, y1 = tubules_um[tubule_id].bounds
+    corners = um_to_px @ np.array([[x0 - pad, x1 + pad], [y0 - pad, y1 + pad], [1, 1]])
+    px0, px1 = int(max(corners[0].min(), 0)), int(min(corners[0].max(), full.shape[2]))
+    py0, py1 = int(max(corners[1].min(), 0)), int(min(corners[1].max(), full.shape[1]))
+    (ex0, ex1), (ey0, ey1) = (px_to_um @ np.array([[px0, px1], [py0, py1], [1, 1]]))[:2]
+    channels = {c: full.sel(c=c).isel(y=slice(py0, py1), x=slice(px0, px1)).data.compute() for c in ["DAPI", "Cellbound3"]}
+    return channels, (ex0, ex1, ey1, ey0)
+
+
+def show_tubule(tubule_id, outline_color, label):
+    """Draw one tubule at full resolution, with its cells filled by type."""
+    channels, extent = read_crop(tubule_id)
+
+    # The cells whose centres are in view and that survived the filter in C1.
+    in_view = ((cell_centres.x > extent[0]) & (cell_centres.x < extent[1])
+               & (cell_centres.y > extent[3]) & (cell_centres.y < extent[2])).to_numpy()
+    in_table = cell_shapes.index[in_view].astype(str).isin(adata.obs_names)
+    ids = cell_shapes.index[in_view][in_table].astype(str)
+    parts = [(np.asarray(part.exterior.coords), cell_id)
+             for geometry, cell_id in zip(cell_shapes.geometry[in_view][in_table], ids) for part in geometry.geoms]
+    cell_polygons = [coords for coords, _ in parts]
+    major_here = [major_calls[cell_id] for _, cell_id in parts]
+    gc_here = [gc_calls[cell_id] for _, cell_id in parts]
+
+    plot_tubule_crop(
+        channels, extent, tubules_um[tubule_id], outline_color, cell_polygons,
+        [TYPE_COLORS[k] for k in major_here], [GC_COLORS[k] for k in gc_here], set(major_here), set(gc_here),
+        f"Tubule {tubule_id}: {label}   ({len(ids):,} cells from the table in view)",
+    )
+    plt.show()
+    print(f"tubule {tubule_id}, {label}: {channels['DAPI'].shape[1]} x {channels['DAPI'].shape[0]} px, "
+          f"{channels['DAPI'].nbytes / 1e6:.0f} MB per channel")
+```
+
+</details>
 
 <details>
 <summary>Code</summary>
