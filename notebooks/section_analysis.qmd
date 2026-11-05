@@ -1,6 +1,6 @@
 ---
 title: "MERFISH testis — per-section demo"
-subtitle: "Dimension reduction, major and germ-cell type annotation, and Alex Vargo's tubules, on the UMAP and the tissue"
+subtitle: "Dimension reduction, major and germ-cell type annotation, and Alex Vargo's tubules and their stage"
 author: "Brent Biddy"
 date: today
 format:
@@ -28,7 +28,7 @@ import spatialdata as sd
 import numpy as np
 import pandas as pd
 from matplotlib.collections import PolyCollection
-from scipy.stats import rankdata
+from scipy.stats import kruskal, rankdata
 from shapely.affinity import affine_transform
 from shapely.geometry import Polygon
 from spatialdata.transformations import get_transformation
@@ -60,6 +60,13 @@ TUBULE_FLAGS = {
 }
 TUBULE_NAVY = "#10105a"
 
+# Phase G: the four stage groups of his computational staging, in order, and the colours they are
+# drawn in. Cells are coloured by the stage of the tubule they are in.
+STAGES = [1, 2, 3, 4]
+STAGE_COLORS = {1: "#56B4E9", 2: "#009E73", 3: "#F0E442", 4: "#D55E00"}
+STAGE_CELL_COLORS = {**{f"stage {s}": c for s, c in STAGE_COLORS.items()},
+                     "unstaged tubule": "#c8c8c8", "outside tubules": "#e6e6e6"}
+
 # Phase D6: the twelve germ-cell types, coloured along one ramp so neighbours look alike.
 GC_TYPES = [f"GC{i}" for i in range(1, 13)]
 GC_COLORS = {gc: mcolors.to_hex(plt.cm.turbo(0.05 + 0.9 * i / 11)) for i, gc in enumerate(GC_TYPES)}
@@ -79,6 +86,10 @@ REFERENCE_DIR = REPO / "results/section_analysis/reference"
 # his flags for them. A section's metadata file may be the "-staged" one.
 (TUBULE_BOUNDS,) = Path(".").glob("*tube-bounds")
 (TUBULE_META,) = Path(".").glob("*tubule-metadata*.csv")
+# Each cell's tubule, one entry per cell of the full table in the table's order, and his staging
+# of the tubules, one table for every section.
+(TUBULE_MAP,) = Path(".").glob("*cell-to-tubule-map-goodcells.npz")
+(TUBULE_ORDER,) = Path(".").glob("*tubule_order*.csv")
 ```
 
 ```{python}
@@ -182,7 +193,7 @@ def plot_tubule_overview(image, polygons, flag_colors, flag_counts, xy, major_po
 
 def plot_tubule_crop(channels, extent, outline, outline_color, cell_polygons, major_colors, gc_colors,
                      major_present, gc_present, title, width=24.0):
-    """E3: one tubule at full resolution: DAPI, Cellbound3, then the cells filled by type and by germ-cell type.
+    """E3: one tubule at full resolution: DAPI, Cellbound3, then the cells filled by type and by germ-cell type, over DAPI.
 
     The figure's height follows the crop's shape, so a thin strip does not leave empty space around it.
     """
@@ -194,7 +205,7 @@ def plot_tubule_crop(channels, extent, outline, outline_color, cell_polygons, ma
     for ax, name in zip(axes[:2], channels):
         ax.imshow(channels[name], cmap="gray", extent=extent, vmin=clip[name][0], vmax=clip[name][1])
         ax.set_title(name)
-    for ax, colors, name in [(axes[2], major_colors, "cells by type"), (axes[3], gc_colors, "germ cells by type")]:
+    for ax, colors, name in [(axes[2], major_colors, "cells by type, over DAPI"), (axes[3], gc_colors, "germ cells by type, over DAPI")]:
         ax.imshow(channels["DAPI"], cmap="gray", extent=extent, vmin=clip["DAPI"][0], vmax=clip["DAPI"][1])
         ax.add_collection(PolyCollection(cell_polygons, facecolors=colors, edgecolors="k", linewidths=0.2, alpha=0.5))
         ax.set_title(name)
@@ -207,12 +218,59 @@ def plot_tubule_crop(channels, extent, outline, outline_color, cell_polygons, ma
     legend_under(axes[3], dot_handles(GC_COLORS, [g for g in GC_COLORS if g in gc_present]), 5, gap=0.0)
     fig.suptitle(title, fontsize=13)
     return fig
+
+
+def draw_staged_tubules(ax, polygons, colors, staged, halo):
+    """Outlines coloured by stage: staged tubules thick, with a halo if asked, the rest thin and grey."""
+    for tubule_id, polygon in polygons.items():
+        is_staged = tubule_id in staged
+        effects = [pe.withStroke(linewidth=3.6, foreground="white")] if halo and is_staged else []
+        ax.plot(*polygon.exterior.xy, color=colors[tubule_id] if is_staged else "#8a8a8a",
+                lw=1.8 if is_staged else 0.7, zorder=3 if is_staged else 2, path_effects=effects)
+
+
+def plot_stage_outlines(image, polygons, stage_colors, staged, xy, gc_points, gc_order, stage_counts, n_unstaged, sample):
+    """G2: DAPI and the germ-cell type calls, each with the tubule outlines coloured by stage."""
+    array, extent, (lo, hi) = image
+    window = dict(xlim=(xy[:, 0].min(), xy[:, 0].max()), ylim=(xy[:, 1].max(), xy[:, 1].min()))
+    fig, axes = plt.subplots(1, 2, figsize=(20, 8.6), constrained_layout=True)
+    axes[0].imshow(array, cmap="gray", vmin=lo, vmax=hi, extent=extent)
+    draw_staged_tubules(axes[0], polygons, stage_colors, staged, halo=False)
+    axes[0].set(title=f"{sample}: DAPI, tubules by stage")
+    axes[1].scatter(xy[gc_order, 0], xy[gc_order, 1], c=gc_points[gc_order], s=0.5, linewidths=0, rasterized=True)
+    draw_staged_tubules(axes[1], polygons, stage_colors, staged, halo=True)
+    axes[1].set(title="germ-cell type, tubules by stage")
+    for ax in axes:
+        ax.set(xlabel="x (µm)", ylabel="y (µm)", **window)
+        ax.set_aspect("equal")
+    handles = [plt.Line2D([], [], color=STAGE_COLORS[s], lw=3, label=f"stage {s} ({stage_counts[s]})") for s in STAGES]
+    handles.append(plt.Line2D([], [], color="#8a8a8a", lw=1, label=f"not staged ({n_unstaged})"))
+    legend_under(axes[0], handles, 5)
+    return fig
+
+
+def plot_stage_composition(mean_types, mean_gc, n_per_stage, sample):
+    """H1: the mean composition of a tubule at each stage, by type and by germ-cell type, as stacked bars."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.4), constrained_layout=True)
+    panels = [(axes[0], mean_types, TYPE_COLORS, "cells in the tubule, by type"),
+              (axes[1], mean_gc, GC_COLORS, "the tubule's germ cells, by germ-cell type")]
+    for ax, mean, colors, title in panels:
+        bottom = np.zeros(len(mean))
+        for name in mean.columns:
+            share = mean[name].to_numpy()
+            ax.bar(range(len(share)), share, bottom=bottom, color=colors[name], width=0.7)
+            bottom += share
+        ax.set_xticks(range(len(mean)), [f"stage {s}\n(n={n_per_stage[s]})" for s in mean.index])
+        ax.set(title=f"{sample}: {title}", ylabel="mean share across tubules", ylim=(0, 1))
+        ax.legend(handles=[plt.Line2D([], [], marker="s", ls="", color=colors[n], ms=8, label=n) for n in mean.columns],
+                  loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False, fontsize=8)
+    return fig
 ```
 
 This notebook is a demo of what the section's data holds. It loads one section's table, reduces
 it to a UMAP, calls every cell's major type and the germ cells' subtype against two published
 references, and draws those calls on the UMAP and on the tissue. It then draws Alex Vargo's tubule outlines over the
-same image and calls. It reports no quality metrics and makes no tubule or stage calls of its own.
+same image and calls, and the stage he gave each tubule. It reports no quality metrics and makes no tubule or stage calls of its own.
 
 ## B1. Load the section
 
@@ -228,6 +286,9 @@ assert adata.obs["sample"].nunique() == 1, "one table must hold exactly one samp
 SAMPLE = str(adata.obs["sample"].iat[0])
 
 adata.layers["counts"] = adata.X.copy()
+# C1 drops cells, and a per-cell file from outside is indexed by the full table: keep each cell's row.
+adata.obs["table_row"] = np.arange(adata.n_obs)
+N_TABLE_CELLS = adata.n_obs
 
 print(f"{SAMPLE}: {adata.n_obs:,} cells x {adata.n_vars} genes")
 ```
@@ -555,10 +616,8 @@ def read_crop(tubule_id, pad=30):
     return channels, (ex0, ex1, ey1, ey0)
 
 
-for flag in TUBULE_FLAGS:
-    if not flag_counts[flag]:
-        continue
-    tubule_id = pick_tubule(flag)
+def show_tubule(tubule_id, outline_color, label):
+    """Draw one tubule at full resolution, with its cells filled by type."""
     channels, extent = read_crop(tubule_id)
 
     # The cells whose centres are in view and that survived the filter in C1.
@@ -573,11 +632,165 @@ for flag in TUBULE_FLAGS:
     gc_here = [gc_calls[cell_id] for _, cell_id in parts]
 
     plot_tubule_crop(
-        channels, extent, tubules_um[tubule_id], TUBULE_FLAGS[flag], cell_polygons,
+        channels, extent, tubules_um[tubule_id], outline_color, cell_polygons,
         [TYPE_COLORS[k] for k in major_here], [GC_COLORS[k] for k in gc_here], set(major_here), set(gc_here),
-        f"Tubule {tubule_id}: {flag}   ({len(ids):,} cells from the table in view)",
+        f"Tubule {tubule_id}: {label}   ({len(ids):,} cells from the table in view)",
     )
     plt.show()
-    print(f"tubule {tubule_id}, {flag}: {channels['DAPI'].shape[1]} x {channels['DAPI'].shape[0]} px, "
+    print(f"tubule {tubule_id}, {label}: {channels['DAPI'].shape[1]} x {channels['DAPI'].shape[0]} px, "
           f"{channels['DAPI'].nbytes / 1e6:.0f} MB per channel")
+
+
+for flag in TUBULE_FLAGS:
+    if flag_counts[flag]:
+        show_tubule(pick_tubule(flag), TUBULE_FLAGS[flag], flag)
+```
+
+## E4. Which tubule each cell is in
+
+His map has one entry per cell of the section's table, in the table's order: a tubule id, or none
+for a cell outside every tubule. C1 dropped cells, so each cell's position in the full table, kept in
+B1 as `table_row`, picks out its entry. It is his assignment, by his rule for cells on a boundary,
+and is not recomputed from the outlines in E1.
+
+```{python}
+cell_map = np.load(TUBULE_MAP, allow_pickle=True)["cell_map"]
+assert len(cell_map) == N_TABLE_CELLS, "the map is not indexed by this section's table"
+
+assigned = cell_map[adata.obs["table_row"].to_numpy()]
+adata.obs["tubule_id"] = np.array(["" if t is None else str(t) for t in assigned], dtype=object)
+
+in_tubule = adata.obs["tubule_id"] != ""
+print(f"{in_tubule.sum():,} of {adata.n_obs:,} cells are in a tubule ({in_tubule.mean():.0%}); "
+      f"{adata.obs.loc[in_tubule, 'tubule_id'].nunique()} tubules")
+```
+
+
+# Phase G — Tubule stage
+
+Each tubule cross-section sits at one point of the cycle of the seminiferous epithelium. The stage
+used here is Alex Vargo's computational one: each tubule's radial gene profile is placed on a ring
+by a principal component analysis across all sixteen sections, and the ring is cut into four stage
+groups, 1 to 4. It is made only for the tubules he flagged as good circles, so the others have no
+stage. His cutoffs were fit to his stage calls made by eye, which agree with these to within one group.
+
+## G1. The stage of each tubule
+
+His table covers every section, so the section's rows are picked by the name his files carry, the
+part of the metadata file's name before `-tubule-metadata`.
+
+```{python}
+section = TUBULE_META.name.split("-tubule-metadata")[0]
+stage_table = pd.read_csv(TUBULE_ORDER)
+stage_table = stage_table[stage_table["samp"] == section]
+assert len(stage_table), f"{TUBULE_ORDER.name} has no rows for {section}"
+
+stage_table["tube_id"] = stage_table["tube_id"].astype(int).astype(str)
+stage_of = stage_table.set_index("tube_id")["prop_stage"].astype(int)
+assert set(stage_of.index) <= set(tubules_um), "a staged tubule has no outline"
+
+stage_counts = stage_of.value_counts().reindex(STAGES, fill_value=0)
+print(f"{section}: {len(stage_of)} of {len(tubules_um)} tubules are staged")
+print(stage_counts.rename(lambda s: f"stage {s}").to_string())
+```
+
+## G2. The tubules by stage
+
+The staged tubules are drawn thick in their stage's colour and the others thin and grey, on DAPI and
+over the germ-cell type calls. Tubules at one stage tend to lie together, which is the order of the
+section and not something the stage was built from.
+
+```{python}
+plot_stage_outlines(
+    TISSUE_IMAGE, tubules_um, {i: STAGE_COLORS[s] for i, s in stage_of.items()}, set(stage_of.index),
+    tissue_xy, gc_points, gc_order, stage_counts, len(tubules_um) - len(stage_of), SAMPLE,
+)
+plt.show()
+```
+
+## G3. Stage on the UMAP and the tissue
+
+Each cell takes the stage of the tubule it is in. Cells in a tubule with no stage, and cells outside
+every tubule, are grey and drawn first, so the staged cells are on top. The UMAP shows whether the
+stages occupy different parts of the germ-cell arc. This is not independent of the calls: the stage
+was computed from gene profiles of these same cells.
+
+```{python}
+def stage_label(tubule_id):
+    if tubule_id == "":
+        return "outside tubules"
+    return f"stage {stage_of[tubule_id]}" if tubule_id in stage_of.index else "unstaged tubule"
+
+
+stage_calls = adata.obs["tubule_id"].map(stage_label)
+
+plot_calls(umap, tissue_xy, stage_calls, STAGE_CELL_COLORS, SAMPLE, "tubule stage",
+           last=[f"stage {s}" for s in STAGES], image=TISSUE_IMAGE, legend_cols=6)
+plt.show()
+print(stage_calls.value_counts().reindex(STAGE_CELL_COLORS).to_string())
+```
+
+
+# Phase H — Composition by stage
+
+## H1. Cell types in a tubule, by stage
+
+For each staged tubule, the share of its cells that are each type, and of its germ cells that are
+each germ-cell type. The bars are the mean across the tubules at a stage. A Kruskal-Wallis test per
+type asks whether its share differs between the four stages; the p values are not corrected for the
+number of types, and neighbouring tubules are not independent, so they say how large a difference is
+and not how certain it is. Types between the tubules (Leydig, Endothelial, Macrophage, InnateLymph,
+Myoid) should not change with stage: they are cells inside generous outlines and not residents of
+the tubule.
+
+```{python}
+staged_cells = adata.obs.loc[adata.obs["tubule_id"].isin(stage_of.index), ["tubule_id"]].assign(
+    cell_type=major_calls, germ_type=gc_calls)
+
+
+def composition(column, names, cells):
+    """Share of each tubule's cells that are each of `names`, one row per tubule."""
+    counts = pd.crosstab(cells["tubule_id"], cells[column]).reindex(columns=names, fill_value=0)
+    counts = counts[counts.sum(axis=1) > 0]
+    return counts.div(counts.sum(axis=1), axis=0)
+
+
+def by_stage(shares):
+    return shares.groupby(stage_of.reindex(shares.index)).mean()
+
+
+def kruskal_p(shares, name):
+    groups = [shares.loc[stage_of.reindex(shares.index) == s, name] for s in STAGES]
+    return kruskal(*groups).pvalue
+
+
+type_shares = composition("cell_type", list(TYPE_COLORS), staged_cells)
+gc_shares = composition("germ_type", GC_TYPES, staged_cells[staged_cells["germ_type"] != "not germ"])
+mean_types, mean_gc = by_stage(type_shares), by_stage(gc_shares)
+
+for label, mean, shares in [("cell type, % of a tubule's cells", mean_types, type_shares),
+                            ("germ-cell type, % of a tubule's germ cells", mean_gc, gc_shares)]:
+    table = (mean.T * 100).round(1).rename(columns=lambda s: f"stage {s}")
+    table["Kruskal p"] = [f"{kruskal_p(shares, name):.1e}" for name in mean.columns]
+    print(label)
+    print(table.to_string(), end="\n\n")
+
+plot_stage_composition(mean_types, mean_gc, stage_counts, SAMPLE)
+plt.show()
+```
+
+## H2. One tubule per stage at full resolution
+
+The composition above is a mean, so here is a single tubule at each stage. It is the staged tubule
+whose germ-cell type shares are closest to the stage's mean, by the sum of the absolute differences,
+so each is a typical tubule of its stage and not a clear one or an odd one. They illustrate the means
+and do not test them. Each panel set is the same as in E3, with the outline in the stage's colour.
+
+```{python}
+for stage in STAGES:
+    candidates = stage_of.index[stage_of == stage].intersection(gc_shares.index)
+    distance = (gc_shares.loc[candidates] - mean_gc.loc[stage]).abs().sum(axis=1)
+    print(f"stage {stage}: tubule {distance.idxmin()}, distance to the stage mean {distance.min():.2f} "
+          f"(median over its tubules {distance.median():.2f})")
+    show_tubule(distance.idxmin(), STAGE_COLORS[stage], f"stage {stage}")
 ```
