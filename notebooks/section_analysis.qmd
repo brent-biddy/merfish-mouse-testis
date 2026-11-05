@@ -1,6 +1,6 @@
 ---
 title: "MERFISH testis — per-section demo"
-subtitle: "Dimension reduction, major and germ-cell subtype annotation, on the UMAP and the tissue"
+subtitle: "Dimension reduction, major and germ-cell type annotation, and Alex Vargo's tubules, on the UMAP and the tissue"
 author: "Brent Biddy"
 date: today
 format:
@@ -27,7 +27,10 @@ import scanpy as sc
 import spatialdata as sd
 import numpy as np
 import pandas as pd
+from matplotlib.collections import PolyCollection
 from scipy.stats import rankdata
+from shapely.affinity import affine_transform
+from shapely.geometry import Polygon
 from spatialdata.transformations import get_transformation
 
 # Cells under this many transcripts are dropped before dimension reduction (C1).
@@ -48,6 +51,15 @@ TYPE_COLORS = {
 }
 GROUP_COLORS = {"germ": "#d98c1f", "somatic": "#4a7fb5"}
 
+# Phase E: how Alex Vargo flagged each tubule, and the colour its outline is drawn in. A tubule
+# is "good" for cells when his cell-to-tubule map can be trusted for it, and a "circle" when its
+# outline is round enough for a radial profile.
+TUBULE_FLAGS = {
+    "good circle": "#2ca02c", "good cells, not circular": "#ff7f0e",
+    "not good cells": "#d62728", "no metadata": "#e377c2",
+}
+TUBULE_NAVY = "#10105a"
+
 # Phase D6: the twelve germ-cell types, coloured along one ramp so neighbours look alike.
 GC_TYPES = [f"GC{i}" for i in range(1, 13)]
 GC_COLORS = {gc: mcolors.to_hex(plt.cm.turbo(0.05 + 0.9 * i / 11)) for i, gc in enumerate(GC_TYPES)}
@@ -63,6 +75,10 @@ REFERENCE_DIR = REPO / "results/section_analysis/reference"
 # comma raises unless exactly one matches.
 (TABLE,) = Path(".").glob("*.create_spatialdata_cellpose.h5ad")
 (STORE,) = Path(".").glob("*.create_spatialdata_cellpose.zarr")
+# Phase E: Alex Vargo's tubule outlines, one <id>.npz per tubule in a directory, and the table of
+# his flags for them. A section's metadata file may be the "-staged" one.
+(TUBULE_BOUNDS,) = Path(".").glob("*tube-bounds")
+(TUBULE_META,) = Path(".").glob("*tubule-metadata*.csv")
 ```
 
 ```{python}
@@ -118,12 +134,85 @@ def plot_calls(umap, xy, calls, colors, sample, what, last=(), image=None, legen
     n_cols = min(len(handles), legend_cols)
     fig.legend(handles=row_major(handles, n_cols), loc="outside lower center", ncol=n_cols, frameon=False, fontsize=8)
     return fig
+
+
+def draw_tubules(ax, polygons, colors=None, lw=1.1, halo=True):
+    """Tubule outlines on an axes in micrometres. `colors` maps a tubule id to a colour; the rest are navy."""
+    effects = [pe.withStroke(linewidth=lw + 1.5, foreground="white")] if halo else []
+    for tubule_id, polygon in polygons.items():
+        x, y = polygon.exterior.xy
+        ax.plot(x, y, color=(colors or {}).get(tubule_id, TUBULE_NAVY), lw=lw, path_effects=effects)
+
+
+def legend_under(ax, handles, ncol, gap=-0.1):
+    """A legend under an axes, reading left to right, then down."""
+    n_cols = min(ncol, len(handles))
+    ax.legend(handles=row_major(handles, n_cols), loc="upper center", bbox_to_anchor=(0.5, gap), ncol=n_cols,
+              frameon=False, fontsize=8, columnspacing=1.0, handletextpad=0.3)
+
+
+def dot_handles(colors, names, ms=6):
+    return [plt.Line2D([], [], marker="o", ls="", color=colors[n], ms=ms, label=n) for n in names]
+
+
+def plot_tubule_overview(image, polygons, flag_colors, flag_counts, xy, major_points, gc_points, gc_order,
+                         major_present, gc_present, sample):
+    """E2: DAPI with the outlines by flag, then the per-cell type and the germ-cell type with navy outlines."""
+    array, extent, (lo, hi) = image
+    window = dict(xlim=(xy[:, 0].min(), xy[:, 0].max()), ylim=(xy[:, 1].max(), xy[:, 1].min()))
+    fig, axes = plt.subplots(1, 3, figsize=(25, 7.8), constrained_layout=True)
+    axes[0].imshow(array, cmap="gray", vmin=lo, vmax=hi, extent=extent)
+    draw_tubules(axes[0], polygons, flag_colors, lw=0.9, halo=False)    # no halo on the dark image
+    axes[0].set(title=f"{sample}: DAPI, tubules by flag")
+    axes[1].scatter(xy[:, 0], xy[:, 1], c=major_points, s=0.5, linewidths=0, rasterized=True)
+    axes[1].set(title="per-cell type")
+    axes[2].scatter(xy[gc_order, 0], xy[gc_order, 1], c=gc_points[gc_order], s=0.5, linewidths=0, rasterized=True)
+    axes[2].set(title="germ-cell type")
+    for ax in axes[1:]:
+        draw_tubules(ax, polygons)
+    for ax in axes:
+        ax.set(xlabel="x (µm)", ylabel="y (µm)", **window)
+        ax.set_aspect("equal")
+    legend_under(axes[0], [plt.Line2D([], [], color=c, lw=2, label=f"{k} ({flag_counts[k]})")
+                           for k, c in TUBULE_FLAGS.items() if flag_counts[k]], 2)
+    legend_under(axes[1], dot_handles(TYPE_COLORS, [t for t in TYPE_COLORS if t in major_present]), 4)
+    legend_under(axes[2], dot_handles(GC_COLORS, [g for g in GC_COLORS if g in gc_present]), 5)
+    return fig
+
+
+def plot_tubule_crop(channels, extent, outline, outline_color, cell_polygons, major_colors, gc_colors,
+                     major_present, gc_present, title, width=24.0):
+    """E3: one tubule at full resolution: DAPI, Cellbound3, then the cells filled by type and by germ-cell type.
+
+    The figure's height follows the crop's shape, so a thin strip does not leave empty space around it.
+    """
+    ex0, ex1, ey1, ey0 = extent
+    panel_width = width / 4 * 0.93
+    height = np.clip(panel_width * abs(ey1 - ey0) / abs(ex1 - ex0) + 1.9, 3.4, 8.5)
+    fig, axes = plt.subplots(1, 4, figsize=(width, height), constrained_layout=True)
+    clip = {name: (np.percentile(a, 1), np.percentile(a, 99.7)) for name, a in channels.items()}
+    for ax, name in zip(axes[:2], channels):
+        ax.imshow(channels[name], cmap="gray", extent=extent, vmin=clip[name][0], vmax=clip[name][1])
+        ax.set_title(name)
+    for ax, colors, name in [(axes[2], major_colors, "cells by type"), (axes[3], gc_colors, "germ cells by type")]:
+        ax.imshow(channels["DAPI"], cmap="gray", extent=extent, vmin=clip["DAPI"][0], vmax=clip["DAPI"][1])
+        ax.add_collection(PolyCollection(cell_polygons, facecolors=colors, edgecolors="k", linewidths=0.2, alpha=0.5))
+        ax.set_title(name)
+    for ax in axes:
+        ax.plot(*outline.exterior.xy, color=outline_color, lw=1.8)
+        ax.set(xlim=(ex0, ex1), ylim=(ey1, ey0))
+        ax.set_aspect("equal")
+        ax.set_axis_off()
+    legend_under(axes[2], dot_handles(TYPE_COLORS, [t for t in TYPE_COLORS if t in major_present]), 5, gap=0.0)
+    legend_under(axes[3], dot_handles(GC_COLORS, [g for g in GC_COLORS if g in gc_present]), 5, gap=0.0)
+    fig.suptitle(title, fontsize=13)
+    return fig
 ```
 
 This notebook is a demo of what the section's data holds. It loads one section's table, reduces
 it to a UMAP, calls every cell's major type and the germ cells' subtype against two published
-references, and draws those calls on the UMAP and on the tissue. It reports no quality metrics and
-makes no tubule or stage calls.
+references, and draws those calls on the UMAP and on the tissue. It then draws Alex Vargo's tubule outlines over the
+same image and calls. It reports no quality metrics and makes no tubule or stage calls of its own.
 
 ## B1. Load the section
 
@@ -372,4 +461,123 @@ plot_calls(umap, tissue_xy, gc_calls, GC_COLORS, SAMPLE, "germ-cell type", last=
 plt.show()
 print(f"{len(gc_shared)} of {adata.n_vars} panel genes shared with GC1-12")
 print(adata.obs["germ_type"].value_counts().sort_index().to_string())
+```
+
+
+# Phase E — Tubules
+
+Alex Vargo's tubules, drawn over the same image and calls. His outlines were traced from the
+Cellbound3 and DAPI images, not from cells, and each tubule carries his flags: whether the cells
+assigned to it can be trusted, and whether its outline is round enough for a radial profile. This
+notebook reads the outlines and the flags and does not redo the segmentation or assign cells.
+
+## E1. Load the outlines
+
+One `<id>.npz` per tubule, holding the outline as an integer path of `(row, column)` points in
+mosaic pixels. The mosaic is the image's own frame, so the outlines need no shift: the columns are
+swapped to `(x, y)` and the store's pixel-to-micrometre transform, inverted in B2, puts them on the
+same axes as the cells. Each tubule is then given one of four flags from his table.
+
+```{python}
+to_um = [px_to_um[0, 0], px_to_um[0, 1], px_to_um[1, 0], px_to_um[1, 1], px_to_um[0, 2], px_to_um[1, 2]]
+tubules_um = {
+    path.stem: affine_transform(Polygon(np.load(path)["global_path"][:, ::-1]), to_um)
+    for path in sorted(TUBULE_BOUNDS.glob("*.npz"), key=lambda p: int(p.stem))
+}
+
+tubule_meta = pd.read_csv(TUBULE_META, index_col=0)
+tubule_meta.index = tubule_meta.index.astype(str)
+
+
+def tubule_flag(tubule_id):
+    if tubule_id not in tubule_meta.index:
+        return "no metadata"
+    row = tubule_meta.loc[tubule_id]
+    if row["good_circle"]:
+        return "good circle"
+    return "good cells, not circular" if row["good_cells_bin"] else "not good cells"
+
+
+flags = pd.Series({tubule_id: tubule_flag(tubule_id) for tubule_id in tubules_um})
+flag_counts = flags.value_counts().reindex(TUBULE_FLAGS, fill_value=0)
+
+print(f"{len(tubules_um)} tubules, {len(tubule_meta)} with a row in his table")
+print(flag_counts.to_string())
+```
+
+## E2. The tubules on the section
+
+Left, the outlines on DAPI, coloured by flag. Middle and right, the same outlines in navy over the
+per-cell type and the germ-cell type, with a white halo so they stay visible over cells of any
+colour. All three panels cover the same window.
+
+```{python}
+major_points = np.array([TYPE_COLORS[k] for k in major_calls])
+gc_points = np.array([GC_COLORS[k] for k in gc_calls])
+gc_order = np.argsort(gc_calls.to_numpy() != "not germ", kind="stable")    # germ cells are drawn on top
+
+plot_tubule_overview(
+    TISSUE_IMAGE, tubules_um, {i: TUBULE_FLAGS[f] for i, f in flags.items()}, flag_counts, tissue_xy,
+    major_points, gc_points, gc_order, set(major_calls), set(gc_calls), SAMPLE,
+)
+plt.show()
+```
+
+## E3. Tubules at full resolution
+
+One tubule per flag, so each kind of outline is seen against the tissue: for each flag, the tubule
+whose outline area is the median of that flag, and for the tubules without a table row, the first.
+A crop is read from the finest level of the image, a few tens of megabytes per channel, and the
+cells in it are filled by type. His outline is drawn in its flag colour on every panel.
+
+```{python}
+full = pyramid[levels[0]]["image"]
+cell_shapes = sdata.shapes[cells_name]
+cell_centres = cell_shapes.geometry.centroid
+area = tubule_meta["area"]
+
+
+def pick_tubule(flag):
+    ids = flags.index[flags == flag]
+    if flag == "no metadata":
+        return ids[0]
+    return area.loc[ids].sort_values().index[len(ids) // 2]
+
+
+def read_crop(tubule_id, pad=30):
+    """The tubule's bounding box, padded by `pad` µm, read from the finest image level."""
+    x0, y0, x1, y1 = tubules_um[tubule_id].bounds
+    corners = um_to_px @ np.array([[x0 - pad, x1 + pad], [y0 - pad, y1 + pad], [1, 1]])
+    px0, px1 = int(max(corners[0].min(), 0)), int(min(corners[0].max(), full.shape[2]))
+    py0, py1 = int(max(corners[1].min(), 0)), int(min(corners[1].max(), full.shape[1]))
+    (ex0, ex1), (ey0, ey1) = (px_to_um @ np.array([[px0, px1], [py0, py1], [1, 1]]))[:2]
+    channels = {c: full.sel(c=c).isel(y=slice(py0, py1), x=slice(px0, px1)).data.compute() for c in ["DAPI", "Cellbound3"]}
+    return channels, (ex0, ex1, ey1, ey0)
+
+
+for flag in TUBULE_FLAGS:
+    if not flag_counts[flag]:
+        continue
+    tubule_id = pick_tubule(flag)
+    channels, extent = read_crop(tubule_id)
+
+    # The cells whose centres are in view and that survived the filter in C1.
+    in_view = ((cell_centres.x > extent[0]) & (cell_centres.x < extent[1])
+               & (cell_centres.y > extent[3]) & (cell_centres.y < extent[2])).to_numpy()
+    in_table = cell_shapes.index[in_view].astype(str).isin(adata.obs_names)
+    ids = cell_shapes.index[in_view][in_table].astype(str)
+    parts = [(np.asarray(part.exterior.coords), cell_id)
+             for geometry, cell_id in zip(cell_shapes.geometry[in_view][in_table], ids) for part in geometry.geoms]
+    cell_polygons = [coords for coords, _ in parts]
+    major_here = [major_calls[cell_id] for _, cell_id in parts]
+    gc_here = [gc_calls[cell_id] for _, cell_id in parts]
+
+    plot_tubule_crop(
+        channels, extent, tubules_um[tubule_id], TUBULE_FLAGS[flag], cell_polygons,
+        [TYPE_COLORS[k] for k in major_here], [GC_COLORS[k] for k in gc_here], set(major_here), set(gc_here),
+        f"Tubule {tubule_id}: {flag}   ({len(ids):,} cells from the table in view)",
+    )
+    plt.show()
+    print(f"tubule {tubule_id}, {flag}: {channels['DAPI'].shape[1]} x {channels['DAPI'].shape[0]} px, "
+          f"{channels['DAPI'].nbytes / 1e6:.0f} MB per channel")
 ```
