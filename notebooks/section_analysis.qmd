@@ -10,6 +10,15 @@ format:
     toc-depth: 2
     filters:
       - fold-code.lua      # code folding, which quarto only does for HTML
+  pptx:
+    reference-doc: ouhsc_ppt_template.pptx   # staged beside the qmd; quarto resolves it from there
+    # `#` is a section header slide and `##` a content slide. Without this pandoc infers the
+    # level from the headings present.
+    slide-level: 2
+    fig-dpi: 200
+    echo: false
+    filters:
+      - figures-only.lua     # the deck is the figures alone; the gfm page keeps the prose and code
 execute:
   warning: false
 ---
@@ -874,6 +883,114 @@ print(f"{np.isfinite(cell_phase).sum():,} of {len(cell_phase):,} cells are in a 
 ```
 
 
+# Phase H — Composition by stage
+
+## H1. Cell types in a tubule, by stage
+
+For each staged tubule, the share of its cells that are each type, and of its germ cells that are
+each germ-cell type. The bars are the mean across the tubules at a stage. A Kruskal-Wallis test per
+type asks whether its share differs between the four stages; the p values are not corrected for the
+number of types, and neighbouring tubules are not independent, so they say how large a difference is
+and not how certain it is. Types between the tubules (Leydig, Endothelial, Macrophage, InnateLymph,
+Myoid) should not change with stage: they are cells inside generous outlines and not residents of
+the tubule.
+
+```{python}
+staged_cells = adata.obs.loc[adata.obs["tubule_id"].isin(stage_of.index), ["tubule_id"]].assign(
+    cell_type=major_calls, germ_type=gc_calls)
+
+
+def composition(column, names, cells):
+    """Share of each tubule's cells that are each of `names`, one row per tubule."""
+    counts = pd.crosstab(cells["tubule_id"], cells[column]).reindex(columns=names, fill_value=0)
+    counts = counts[counts.sum(axis=1) > 0]
+    return counts.div(counts.sum(axis=1), axis=0)
+
+
+def by_stage(shares):
+    return shares.groupby(stage_of.reindex(shares.index)).mean()
+
+
+def kruskal_p(shares, name):
+    groups = [shares.loc[stage_of.reindex(shares.index) == s, name] for s in STAGES]
+    return kruskal(*groups).pvalue
+
+
+type_shares = composition("cell_type", list(TYPE_COLORS), staged_cells)
+gc_shares = composition("germ_type", GC_TYPES, staged_cells[staged_cells["germ_type"] != "not germ"])
+mean_types, mean_gc = by_stage(type_shares), by_stage(gc_shares)
+
+for label, mean, shares in [("cell type, % of a tubule's cells", mean_types, type_shares),
+                            ("germ-cell type, % of a tubule's germ cells", mean_gc, gc_shares)]:
+    table = (mean.T * 100).round(1).rename(columns=lambda s: f"stage {s}")
+    table["Kruskal p"] = [f"{kruskal_p(shares, name):.1e}" for name in mean.columns]
+    print(label)
+    print(table.to_string(), end="\n\n")
+
+plot_stage_composition(mean_types, mean_gc, stage_counts, SAMPLE)
+plt.show()
+```
+
+## H2. One tubule per stage at full resolution
+
+The composition above is a mean, so here is a single tubule at each stage. It is the staged tubule
+whose germ-cell type shares are closest to the stage's mean, by the sum of the absolute differences,
+so each is a typical tubule of its stage and not a clear one or an odd one. They illustrate the means
+and do not test them. A crop is read from the finest level of the image, a few tens of megabytes per
+channel. Its cells are filled by type, over DAPI and Cellbound3, and the outline is Alex Vargo's, in
+the stage's colour.
+
+```{python}
+full = pyramid[levels[0]]["image"]
+cell_shapes = sdata.shapes[cells_name]
+cell_centres = cell_shapes.geometry.centroid
+
+
+def read_crop(tubule_id, pad=30):
+    """The tubule's bounding box, padded by `pad` µm, read from the finest image level."""
+    x0, y0, x1, y1 = tubules_um[tubule_id].bounds
+    corners = um_to_px @ np.array([[x0 - pad, x1 + pad], [y0 - pad, y1 + pad], [1, 1]])
+    px0, px1 = int(max(corners[0].min(), 0)), int(min(corners[0].max(), full.shape[2]))
+    py0, py1 = int(max(corners[1].min(), 0)), int(min(corners[1].max(), full.shape[1]))
+    (ex0, ex1), (ey0, ey1) = (px_to_um @ np.array([[px0, px1], [py0, py1], [1, 1]]))[:2]
+    channels = {c: full.sel(c=c).isel(y=slice(py0, py1), x=slice(px0, px1)).data.compute() for c in ["DAPI", "Cellbound3"]}
+    return channels, (ex0, ex1, ey1, ey0)
+
+
+def show_tubule(tubule_id, outline_color, label):
+    """Draw one tubule at full resolution, with its cells filled by type."""
+    channels, extent = read_crop(tubule_id)
+
+    # The cells whose centres are in view and that survived the filter in C1.
+    in_view = ((cell_centres.x > extent[0]) & (cell_centres.x < extent[1])
+               & (cell_centres.y > extent[3]) & (cell_centres.y < extent[2])).to_numpy()
+    in_table = cell_shapes.index[in_view].astype(str).isin(adata.obs_names)
+    ids = cell_shapes.index[in_view][in_table].astype(str)
+    parts = [(np.asarray(part.exterior.coords), cell_id)
+             for geometry, cell_id in zip(cell_shapes.geometry[in_view][in_table], ids) for part in geometry.geoms]
+    cell_polygons = [coords for coords, _ in parts]
+    major_here = [major_calls[cell_id] for _, cell_id in parts]
+    gc_here = [gc_calls[cell_id] for _, cell_id in parts]
+
+    plot_tubule_crop(
+        channels, extent, tubules_um[tubule_id], outline_color, cell_polygons,
+        [TYPE_COLORS[k] for k in major_here], [GC_COLORS[k] for k in gc_here], set(major_here), set(gc_here),
+        f"Tubule {tubule_id}: {label}   ({len(ids):,} cells from the table in view)",
+    )
+    plt.show()
+    print(f"tubule {tubule_id}, {label}: {channels['DAPI'].shape[1]} x {channels['DAPI'].shape[0]} px, "
+          f"{channels['DAPI'].nbytes / 1e6:.0f} MB per channel")
+```
+
+```{python}
+for stage in STAGES:
+    candidates = stage_of.index[stage_of == stage].intersection(gc_shares.index)
+    distance = (gc_shares.loc[candidates] - mean_gc.loc[stage]).abs().sum(axis=1)
+    print(f"stage {stage}: tubule {distance.idxmin()}, distance to the stage mean {distance.min():.2f} "
+          f"(median over its tubules {distance.median():.2f})")
+    show_tubule(distance.idxmin(), STAGE_COLORS[stage], f"stage {stage}")
+```
+
 # Phase G — Radial position
 
 Where a cell sits between the middle of its tubule and the wall, by Alex Vargo's definition
@@ -1179,113 +1296,4 @@ plot_all_genes({key: arr[cycle_order] for key, arr in across_cycle.items()}, cyc
                f"{SAMPLE}: every gene around the cycle, averaged over the radius, {len(tubule_order)} staged tubules",
                stage_per_tubule=stage_by_tubule)
 plt.show()
-```
-
-
-# Phase H — Composition by stage
-
-## H1. Cell types in a tubule, by stage
-
-For each staged tubule, the share of its cells that are each type, and of its germ cells that are
-each germ-cell type. The bars are the mean across the tubules at a stage. A Kruskal-Wallis test per
-type asks whether its share differs between the four stages; the p values are not corrected for the
-number of types, and neighbouring tubules are not independent, so they say how large a difference is
-and not how certain it is. Types between the tubules (Leydig, Endothelial, Macrophage, InnateLymph,
-Myoid) should not change with stage: they are cells inside generous outlines and not residents of
-the tubule.
-
-```{python}
-staged_cells = adata.obs.loc[adata.obs["tubule_id"].isin(stage_of.index), ["tubule_id"]].assign(
-    cell_type=major_calls, germ_type=gc_calls)
-
-
-def composition(column, names, cells):
-    """Share of each tubule's cells that are each of `names`, one row per tubule."""
-    counts = pd.crosstab(cells["tubule_id"], cells[column]).reindex(columns=names, fill_value=0)
-    counts = counts[counts.sum(axis=1) > 0]
-    return counts.div(counts.sum(axis=1), axis=0)
-
-
-def by_stage(shares):
-    return shares.groupby(stage_of.reindex(shares.index)).mean()
-
-
-def kruskal_p(shares, name):
-    groups = [shares.loc[stage_of.reindex(shares.index) == s, name] for s in STAGES]
-    return kruskal(*groups).pvalue
-
-
-type_shares = composition("cell_type", list(TYPE_COLORS), staged_cells)
-gc_shares = composition("germ_type", GC_TYPES, staged_cells[staged_cells["germ_type"] != "not germ"])
-mean_types, mean_gc = by_stage(type_shares), by_stage(gc_shares)
-
-for label, mean, shares in [("cell type, % of a tubule's cells", mean_types, type_shares),
-                            ("germ-cell type, % of a tubule's germ cells", mean_gc, gc_shares)]:
-    table = (mean.T * 100).round(1).rename(columns=lambda s: f"stage {s}")
-    table["Kruskal p"] = [f"{kruskal_p(shares, name):.1e}" for name in mean.columns]
-    print(label)
-    print(table.to_string(), end="\n\n")
-
-plot_stage_composition(mean_types, mean_gc, stage_counts, SAMPLE)
-plt.show()
-```
-
-## H2. One tubule per stage at full resolution
-
-The composition above is a mean, so here is a single tubule at each stage. It is the staged tubule
-whose germ-cell type shares are closest to the stage's mean, by the sum of the absolute differences,
-so each is a typical tubule of its stage and not a clear one or an odd one. They illustrate the means
-and do not test them. A crop is read from the finest level of the image, a few tens of megabytes per
-channel. Its cells are filled by type, over DAPI and Cellbound3, and the outline is Alex Vargo's, in
-the stage's colour.
-
-```{python}
-full = pyramid[levels[0]]["image"]
-cell_shapes = sdata.shapes[cells_name]
-cell_centres = cell_shapes.geometry.centroid
-
-
-def read_crop(tubule_id, pad=30):
-    """The tubule's bounding box, padded by `pad` µm, read from the finest image level."""
-    x0, y0, x1, y1 = tubules_um[tubule_id].bounds
-    corners = um_to_px @ np.array([[x0 - pad, x1 + pad], [y0 - pad, y1 + pad], [1, 1]])
-    px0, px1 = int(max(corners[0].min(), 0)), int(min(corners[0].max(), full.shape[2]))
-    py0, py1 = int(max(corners[1].min(), 0)), int(min(corners[1].max(), full.shape[1]))
-    (ex0, ex1), (ey0, ey1) = (px_to_um @ np.array([[px0, px1], [py0, py1], [1, 1]]))[:2]
-    channels = {c: full.sel(c=c).isel(y=slice(py0, py1), x=slice(px0, px1)).data.compute() for c in ["DAPI", "Cellbound3"]}
-    return channels, (ex0, ex1, ey1, ey0)
-
-
-def show_tubule(tubule_id, outline_color, label):
-    """Draw one tubule at full resolution, with its cells filled by type."""
-    channels, extent = read_crop(tubule_id)
-
-    # The cells whose centres are in view and that survived the filter in C1.
-    in_view = ((cell_centres.x > extent[0]) & (cell_centres.x < extent[1])
-               & (cell_centres.y > extent[3]) & (cell_centres.y < extent[2])).to_numpy()
-    in_table = cell_shapes.index[in_view].astype(str).isin(adata.obs_names)
-    ids = cell_shapes.index[in_view][in_table].astype(str)
-    parts = [(np.asarray(part.exterior.coords), cell_id)
-             for geometry, cell_id in zip(cell_shapes.geometry[in_view][in_table], ids) for part in geometry.geoms]
-    cell_polygons = [coords for coords, _ in parts]
-    major_here = [major_calls[cell_id] for _, cell_id in parts]
-    gc_here = [gc_calls[cell_id] for _, cell_id in parts]
-
-    plot_tubule_crop(
-        channels, extent, tubules_um[tubule_id], outline_color, cell_polygons,
-        [TYPE_COLORS[k] for k in major_here], [GC_COLORS[k] for k in gc_here], set(major_here), set(gc_here),
-        f"Tubule {tubule_id}: {label}   ({len(ids):,} cells from the table in view)",
-    )
-    plt.show()
-    print(f"tubule {tubule_id}, {label}: {channels['DAPI'].shape[1]} x {channels['DAPI'].shape[0]} px, "
-          f"{channels['DAPI'].nbytes / 1e6:.0f} MB per channel")
-```
-
-```{python}
-for stage in STAGES:
-    candidates = stage_of.index[stage_of == stage].intersection(gc_shares.index)
-    distance = (gc_shares.loc[candidates] - mean_gc.loc[stage]).abs().sum(axis=1)
-    print(f"stage {stage}: tubule {distance.idxmin()}, distance to the stage mean {distance.min():.2f} "
-          f"(median over its tubules {distance.median():.2f})")
-    show_tubule(distance.idxmin(), STAGE_COLORS[stage], f"stage {stage}")
 ```

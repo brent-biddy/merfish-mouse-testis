@@ -12,6 +12,7 @@ process QUARTO_RENDER {
     path qmd
     path 'ouhsc_ppt_template.pptx'
     path 'fold-code.lua'
+    path 'figures-only.lua'
 
     output:
     path "${output_dir}", emit: report
@@ -56,7 +57,8 @@ workflow render {
 
     QUARTO_RENDER(ch_quarto_render_inputs, publish_dir, val_quarto_format, val_qmd_file,
                   file("${projectDir}/assets/ouhsc_ppt_template.pptx"),
-                  file("${projectDir}/assets/fold-code.lua"))
+                  file("${projectDir}/assets/fold-code.lua"),
+                  file("${projectDir}/assets/figures-only.lua"))
 
     emit:
     reports = QUARTO_RENDER.out.report
