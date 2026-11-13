@@ -46,7 +46,7 @@ from shapely.geometry import Polygon
 from shapely import get_parts, get_type_id, linestrings
 from spatialdata.transformations import get_transformation
 
-# Cells under this many transcripts are dropped before dimension reduction (C1).
+# Cells under this many transcripts are dropped by the cell filter, before dimension reduction.
 LOW_COUNT_CUT = 20
 
 # Cell-type annotation: the reference's cell types, germ first, and the colours the figures draw them in.
@@ -96,7 +96,7 @@ TUBE_LIBRARY_SIZE = 1e6
 # A gene needs this many transcripts in the staged tubules to be drawn among all genes; fewer is noise.
 MIN_GENE_TRANSCRIPTS = 500
 
-# D6: the twelve germ-cell types, coloured along one ramp so neighbours look alike.
+# Germ-cell subtypes: the twelve germ-cell types, coloured along one ramp so neighbours look alike.
 GC_TYPES = [f"GC{i}" for i in range(1, 13)]
 GC_COLORS = {gc: mcolors.to_hex(plt.cm.turbo(0.05 + 0.9 * i / 11)) for i, gc in enumerate(GC_TYPES)}
 GC_COLORS["not germ"] = "#d9d9d9"
@@ -137,7 +137,7 @@ def row_major(handles, ncol):
 
 
 def plot_calls(umap, xy, calls, colors, sample, what, last=(), image=None, legend_cols=6, umap_labels=None):
-    """D5: a per-cell label on the UMAP and on the tissue, legend in one row beneath.
+    """A per-cell label on the UMAP and on the tissue, legend in one row beneath.
 
     Labels in `last` are drawn on top. `image` is (array, extent, clip): a stain image, the
     extent it covers in tissue micrometres and its display range. It gets its own panel between
@@ -197,7 +197,7 @@ def dot_handles(colors, names, ms=6):
 
 def plot_tubule_overview(image, polygons, flag_colors, flag_counts, xy, major_points, gc_points, gc_order,
                          major_present, gc_present, sample):
-    """E2: DAPI with the outlines by flag, then the per-cell type and the germ-cell type with navy outlines."""
+    """DAPI with the outlines by flag, then the per-cell type and the germ-cell type with navy outlines."""
     array, extent, (lo, hi) = image
     window = dict(xlim=(xy[:, 0].min(), xy[:, 0].max()), ylim=(xy[:, 1].max(), xy[:, 1].min()))
     fig, axes = plt.subplots(1, 3, figsize=(25, 7.8), constrained_layout=True)
@@ -222,7 +222,7 @@ def plot_tubule_overview(image, polygons, flag_colors, flag_counts, xy, major_po
 
 def plot_tubule_crop(channels, extent, outline, outline_color, cell_polygons, major_colors, gc_colors,
                      major_present, gc_present, title, width=24.0):
-    """H2: one tubule at full resolution: DAPI, Cellbound3, then the cells filled by type and by germ-cell type, over DAPI.
+    """One tubule at full resolution: DAPI, Cellbound3, then the cells filled by type and by germ-cell type, over DAPI.
 
     The figure's height follows the crop's shape, so a thin strip does not leave empty space around it.
     """
@@ -277,7 +277,7 @@ def add_phase_colorbar(fig, axes, cuts):
 
 def plot_stage_outlines(image, polygons, stage_colors, phase_colors, cuts, staged, xy, gc_points, gc_order,
                         stage_counts, n_unstaged, sample):
-    """F2: DAPI and the germ-cell type calls with the outlines coloured by stage, then DAPI again by the continuous stage."""
+    """DAPI and the germ-cell type calls with the outlines coloured by stage, then DAPI again by the continuous stage."""
     array, extent, (lo, hi) = image
     window = dict(xlim=(xy[:, 0].min(), xy[:, 0].max()), ylim=(xy[:, 1].max(), xy[:, 1].min()))
     fig, axes = plt.subplots(1, 3, figsize=(27, 8.6), constrained_layout=True)
@@ -301,7 +301,7 @@ def plot_stage_outlines(image, polygons, stage_colors, phase_colors, cuts, stage
 
 
 def plot_phase_cells(umap, xy, cell_phase, cuts, sample):
-    """F3: each cell coloured by its tubule's position on the stage ring, on the UMAP and the tissue.
+    """Each cell coloured by its tubule's position on the stage ring, on the UMAP and the tissue.
 
     `cell_phase` is NaN for a cell outside every tubule or in an unstaged one: those are grey and
     drawn first, so the staged cells are on top.
@@ -324,7 +324,7 @@ def plot_phase_cells(umap, xy, cell_phase, cuts, sample):
 
 
 def plot_density_heatmaps(density, smoothed, types, stage_per_tubule, sample, n_bins, sigma):
-    """G2: one heatmap per cell type, tubules along x in ring order and radial bins up from the middle.
+    """One heatmap per cell type, tubules along x in ring order and radial bins up from the middle.
     Top row the density as counted, bottom row smoothed; each panel runs from 0 to its own 99th percentile."""
     n_tubules = density.shape[1]
     fig, axes = plt.subplots(2, len(types), figsize=(4.2 * len(types), 8), constrained_layout=True)
@@ -360,7 +360,7 @@ def stage_bar(ax, stage_per_tubule, top):
 
 
 def plot_total_transcripts(panels, stage_per_tubule, sample, n_bins):
-    """G4: total transcripts by radial bin, one heatmap per (array, title), tubules along x in ring order."""
+    """Total transcripts by radial bin, one heatmap per (array, title), tubules along x in ring order."""
     fig, axes = plt.subplots(1, len(panels), figsize=(5 * len(panels), 4.6), constrained_layout=True)
     for ax, (arr, title) in zip(axes, panels):
         im = ax.imshow(arr.T, origin="lower", aspect="auto", cmap="coolwarm",
@@ -376,7 +376,7 @@ def plot_total_transcripts(panels, stage_per_tubule, sample, n_bins):
 
 
 def plot_gene_heatmaps(by_row, genes, stage_per_tubule, sample, n_bins, sigma):
-    """G5: one heatmap per marker gene, tubules along x in ring order and radial bins up from the middle.
+    """One heatmap per marker gene, tubules along x in ring order and radial bins up from the middle.
     `by_row` is the unsmoothed then the smoothed list of tubules-by-bins arrays, one per entry of `genes`, which
     are (title, gene index) pairs. Top row normalized to an equal total per tubule, bottom row smoothed; each
     panel has its own colour scale."""
@@ -401,7 +401,7 @@ def plot_gene_heatmaps(by_row, genes, stage_per_tubule, sample, n_bins, sigma):
 
 
 def plot_all_genes(by_compartment, order, names, marked, xlabel, title, stage_per_tubule=None):
-    """G6, G7: every gene as one row, one heatmap per compartment with the same gene order, each row on its own
+    """Every gene as one row, one heatmap per compartment with the same gene order, each row on its own
     z-score scale. `by_compartment` maps "all", "intra" and "extra" to a genes-by-columns array already in `order`."""
     fig, axes = plt.subplots(1, 3, figsize=(16, 13), constrained_layout=True, sharey=True)
     for ax, (key, label) in zip(axes, [("all", "all transcripts"), ("intra", "inside a cell"), ("extra", "outside any cell")]):
@@ -424,7 +424,7 @@ def plot_all_genes(by_compartment, order, names, marked, xlabel, title, stage_pe
 
 
 def plot_stage_composition(mean_types, mean_gc, n_per_stage, sample):
-    """H1: the mean composition of a tubule at each stage, by type and by germ-cell type, as stacked bars."""
+    """The mean composition of a tubule at each stage, by type and by germ-cell type, as stacked bars."""
     fig, axes = plt.subplots(1, 2, figsize=(14, 5.4), constrained_layout=True)
     panels = [(axes[0], mean_types, TYPE_COLORS, "cells in the tubule, by type"),
               (axes[1], mean_gc, GC_COLORS, "the tubule's germ cells, by germ-cell type")]
@@ -446,7 +446,7 @@ it to a UMAP, calls every cell's major type and the germ cells' subtype against 
 references, and draws those calls on the UMAP and on the tissue. It then draws Alex Vargo's tubule outlines over the
 same image and calls, the stage he gave each tubule, where each cell sits between the middle of its tubule and the wall, and how the cell types and the transcripts are spread across that radius. It reports no quality metrics and makes no tubule or stage calls of its own.
 
-## B1. Load the section
+## Load the section
 
 The table is the pipeline's output: raw counts for the 491 panel genes in `X` and per-cell
 segmentation metadata in `obs`. The raw counts are copied to a layer, because normalization
@@ -460,14 +460,14 @@ assert adata.obs["sample"].nunique() == 1, "one table must hold exactly one samp
 SAMPLE = str(adata.obs["sample"].iat[0])
 
 adata.layers["counts"] = adata.X.copy()
-# C1 drops cells, and a per-cell file from outside is indexed by the full table: keep each cell's row.
+# The cell filter drops cells, and a per-cell file from outside is indexed by the full table: keep each cell's row.
 adata.obs["table_row"] = np.arange(adata.n_obs)
 N_TABLE_CELLS = adata.n_obs
 
 print(f"{SAMPLE}: {adata.n_obs:,} cells x {adata.n_vars} genes")
 ```
 
-## B2. The tissue image
+## The tissue image
 
 The DAPI stain, from the section's store, as the ground truth the calls are read against. The
 store keeps the mosaic as a pyramid of resolutions, and only a coarse one is read: the first
@@ -500,7 +500,7 @@ print(f"{image_name}, level {level}: {dapi.shape[1]} x {dapi.shape[0]} px, {dapi
 One default recipe, run on every section and left untuned. Nothing is clustered: cells are
 annotated one at a time in the cell-type annotation, and the UMAP below is for looking at the data.
 
-## C1. Filter cells
+## Filter cells
 
 Drop cells under `LOW_COUNT_CUT` transcripts. The high cut for doublets and merged cells is off. All 491 genes are kept: the panel is already curated, so there is no
 highly-variable-gene selection and no gene filter.
@@ -512,7 +512,7 @@ print(f"kept {adata.n_obs:,} of {n_before:,} cells ({1 - adata.n_obs / n_before:
       f"{adata.n_vars} genes")
 ```
 
-## C2. Normalize
+## Normalize
 
 Scale every cell to the section's median total, then take the log. The log-normalized values
 are kept in a layer, because scaling overwrites `X` and the markers in the cell-type annotation are read from
@@ -524,7 +524,7 @@ sc.pp.log1p(adata)
 adata.layers["lognorm"] = adata.X.copy()
 ```
 
-## C3. Scale
+## Scale
 
 Unit variance, not centred, clipped at 10.
 
@@ -532,7 +532,7 @@ Unit variance, not centred, clipped at 10.
 sc.pp.scale(adata, zero_center=False, max_value=10)
 ```
 
-## C4. PCA
+## PCA
 
 Thirty components.
 
@@ -540,7 +540,7 @@ Thirty components.
 sc.pp.pca(adata, n_comps=30, random_state=0)
 ```
 
-## C5. Neighbour graph
+## Neighbour graph
 
 Fifteen neighbours, cosine distance.
 
@@ -548,7 +548,7 @@ Fifteen neighbours, cosine distance.
 sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)
 ```
 
-## C6. UMAP
+## UMAP
 
 Not drawn here; the cell-type annotation draws it, coloured by the calls.
 
@@ -561,9 +561,9 @@ sc.tl.umap(adata, random_state=0)
 Every cell is correlated against a reference and takes the type it correlates with most. The
 first pass stops at germ or somatic: a cell is germ when that type is one of the four germ
 types, and somatic otherwise. Nothing is clustered, and nothing is named at the cluster level.
-D6 then calls the germ cells' subtype, against a finer reference, on the germ cells alone.
+A second pass then calls the germ cells' subtype, against a finer reference, on the germ cells alone.
 
-## D0. The reference
+## The reference
 
 Green et al. 2018's 11 major cell types, as the mean expression per type over the panel genes:
 ln(mean TP10K + 1). The table is made once for every section from the published counts and
@@ -580,7 +580,7 @@ reference = pd.read_csv(reference_file, index_col=0)[CELL_TYPES]
 print(f"reference: {reference.shape[0]} genes x {reference.shape[1]} types")
 ```
 
-## D3. Per-cell correlation
+## Per-cell correlation
 
 Spearman correlation of each cell's raw counts against every reference type, over the genes
 the panel and the reference share. Spearman is Pearson on ranks, so both sides are ranked
@@ -609,7 +609,7 @@ print(f"{len(shared)} of {adata.n_vars} panel genes shared with the reference; {
       f"correlations run from {correlation.min():.2f} to {correlation.max():.2f}")
 ```
 
-## D4. Standardize within each cell
+## Standardize within each cell
 
 A cell's correlation to every type rises with how many genes it captured. Standardizing each
 cell's 11 correlations to zero mean and unit variance makes cells comparable with each other,
@@ -621,7 +621,7 @@ for j, cell_type in enumerate(reference.columns):
     adata.obs[f"corr_{cell_type}"] = standardized[:, j]
 ```
 
-## D5. Per-cell call
+## Per-cell call
 
 The type each cell correlates with most, and from it germ or somatic: germ when the type is
 SPG, Scytes, STids or Elongating. Drawn on the UMAP, the germ cells lie along one arc in stage
@@ -660,10 +660,10 @@ print(f"germ {share['germ']:.1%}, somatic {share['somatic']:.1%}")
 ```
 
 
-## D6. Germ-cell subtypes
+## Germ-cell subtypes
 
 The germ cells alone, against Green's twelve germ-cell types, GC1 to GC12, as published. The
-steps are D3 to D5 again on a finer reference: Spearman correlation of each germ cell's raw
+steps are the same as for the major types, on a finer reference: Spearman correlation of each germ cell's raw
 counts, standardized within the cell, then its top type. Nothing is reclustered. GC1 to GC12
 are differentiation states in order, so on tissue they should run from the wall inward.
 
@@ -706,11 +706,11 @@ Cellbound3 and DAPI images, not from cells, and each tubule carries his flags: w
 assigned to it can be trusted, and whether its outline is round enough for a radial profile. This
 notebook reads the outlines and the flags and does not redo the segmentation or assign cells.
 
-## E1. Load the outlines
+## Load the outlines
 
 One `<id>.npz` per tubule, holding the outline as an integer path of `(row, column)` points in
 mosaic pixels. The mosaic is the image's own frame, so the outlines need no shift: the columns are
-swapped to `(x, y)` and the store's pixel-to-micrometre transform, inverted in B2, puts them on the
+swapped to `(x, y)` and the store's pixel-to-micrometre transform, inverted for the tissue image, puts them on the
 same axes as the cells. Each tubule is then given one of four flags from his table.
 
 ```{python}
@@ -740,7 +740,7 @@ print(f"{len(tubules_um)} tubules, {len(tubule_meta)} with a row in his table")
 print(flag_counts.to_string())
 ```
 
-## E2. The tubules on the section
+## The tubules on the section
 
 Left, the outlines on DAPI, coloured by flag. Middle and right, the same outlines in navy over the
 per-cell type and the germ-cell type, with a white halo so they stay visible over cells of any
@@ -758,12 +758,12 @@ plot_tubule_overview(
 plt.show()
 ```
 
-## E3. Which tubule each cell is in
+## Which tubule each cell is in
 
 His map has one entry per cell of the section's table, in the table's order: a tubule id, or none
-for a cell outside every tubule. C1 dropped cells, so each cell's position in the full table, kept in
-B1 as `table_row`, picks out its entry. It is his assignment, by his rule for cells on a boundary,
-and is not recomputed from the outlines in E1.
+for a cell outside every tubule. The cell filter dropped cells, so each cell's position in the full table, kept at
+loading as `table_row`, picks out its entry. It is his assignment, by his rule for cells on a boundary,
+and is not recomputed from the outlines.
 
 ```{python}
 cell_map = np.load(TUBULE_MAP, allow_pickle=True)["cell_map"]
@@ -786,7 +786,7 @@ by a principal component analysis across all sixteen sections, and the ring is c
 groups, 1 to 4. It is made only for the tubules he flagged as good circles, so the others have no
 stage. His cutoffs were fit to his stage calls made by eye, which agree with these to within one group.
 
-## F1. The stage of each tubule
+## The stage of each tubule
 
 His table covers every section, so the section's rows are picked by the name his files carry, the
 part of the metadata file's name before `-tubule-metadata`.
@@ -827,7 +827,7 @@ print(span.round(2).rename(index=lambda s: f"stage {s}").to_string())
 print("cuts at " + ", ".join(f"{c:.2f}" for c in cuts))
 ```
 
-## F2. The tubules by stage
+## The tubules by stage
 
 The staged tubules are drawn thick in their stage's colour and the others thin and grey, on DAPI and
 over the germ-cell type calls. Tubules at one stage tend to lie together, which is the order of the
@@ -849,7 +849,7 @@ plot_stage_outlines(
 plt.show()
 ```
 
-## F3. Stage on the UMAP and the tissue
+## Stage on the UMAP and the tissue
 
 Each cell takes the stage of the tubule it is in. Cells in a tubule with no stage, and cells outside
 every tubule, are grey and drawn first, so the staged cells are on top. The UMAP shows whether the
@@ -885,7 +885,7 @@ print(f"{np.isfinite(cell_phase).sum():,} of {len(cell_phase):,} cells are in a 
 
 # Composition by stage
 
-## H1. Cell types in a tubule, by stage
+## Cell types in a tubule, by stage
 
 For each staged tubule, the share of its cells that are each type, and of its germ cells that are
 each germ-cell type. The bars are the mean across the tubules at a stage. A Kruskal-Wallis test per
@@ -931,7 +931,7 @@ plot_stage_composition(mean_types, mean_gc, stage_counts, SAMPLE)
 plt.show()
 ```
 
-## H2. One tubule per stage at full resolution
+## One tubule per stage at full resolution
 
 The composition above is a mean, so here is a single tubule at each stage. It is the staged tubule
 whose germ-cell type shares are closest to the stage's mean, by the sum of the absolute differences,
@@ -961,7 +961,7 @@ def show_tubule(tubule_id, outline_color, label):
     """Draw one tubule at full resolution, with its cells filled by type."""
     channels, extent = read_crop(tubule_id)
 
-    # The cells whose centres are in view and that survived the filter in C1.
+    # The cells whose centres are in view and that survived the cell filter.
     in_view = ((cell_centres.x > extent[0]) & (cell_centres.x < extent[1])
                & (cell_centres.y > extent[3]) & (cell_centres.y < extent[2])).to_numpy()
     in_table = cell_shapes.index[in_view].astype(str).isin(adata.obs_names)
@@ -997,7 +997,7 @@ Where a cell sits between the middle of its tubule and the wall, by Alex Vargo's
 (`radialTubule.create_tubule_transcript_polar_info`). It needs only his outlines and the cells, so
 every cell in a tubule gets one, staged or not.
 
-## G1. Radial position of every cell
+## Radial position of every cell
 
 `rad` is the distance from the outline's centroid to the cell. `dist_to_edge` comes from a ray cast
 from the cell, outward along its angle from the centroid, for the length of the outline's bounding-box
@@ -1042,7 +1042,7 @@ has_position = adata.obs["radial_pos"].notna()
 print(f"{has_position.sum():,} cells have a radial position; {n_outside} are not strictly inside their own outline and sit at 1")
 ```
 
-## G2. Cell-type density by radial position
+## Cell-type density by radial position
 
 The cells of each type counted into 50 bins of equal area, with edges at the square root of k over 50, so
 that a bin holds the same share of a tubule's area whatever its size. The density is the count over the
@@ -1078,7 +1078,7 @@ print(pd.Series(counts.sum(axis=(1, 2)), index=DENSITY_TYPES).astype(int).to_str
 ```
 
 
-## G3. Transcripts in each tubule, by radial position
+## Transcripts in each tubule, by radial position
 
 The transcripts of the section, from the store's points, with the blank codewords dropped. Each is put in
 the tubule whose outline contains it, boundary included, and then given the same radial position as a
@@ -1093,7 +1093,7 @@ gives each transcript the cell it falls in, or none) and those outside any cell.
 The ray that gives each transcript its distance to the wall is the same as for cells, but the farthest
 crossing of the ray with the outline is found directly, one outline edge at a time. That is the length of the
 one piece the ray cuts from the outline, or the farthest coordinate where it cuts several, so it gives the
-same `dist_to_edge` as G1 to within 1e-11 µm and is fast enough for twelve million transcripts.
+same `dist_to_edge` as the per-cell radial position to within 1e-11 µm and is fast enough for twelve million transcripts.
 
 ```{python}
 @numba.njit(parallel=True)
@@ -1117,7 +1117,7 @@ def farthest_crossing(px, py, dx, dy, reach, ax, ay, bx, by):
 
 
 def radial_position_fast(xy, polygon):
-    """G1's radial position for many points: the same ray, with the farthest crossing found by `farthest_crossing`."""
+    """The per-cell radial position for many points: the same ray, with the farthest crossing found by `farthest_crossing`."""
     centroid = polygon.centroid
     x0, y0, x1, y1 = polygon.bounds
     angle = np.arctan2(xy[:, 1] - centroid.y, xy[:, 0] - centroid.x)
@@ -1202,7 +1202,7 @@ print(f"{n_in_cell / n_transcripts:.1%} of the transcripts are inside a cell and
 print(f"per staged tubule: min {per_tubule.min():,.0f}, median {np.median(per_tubule):,.0f}, max {per_tubule.max():,.0f}")
 ```
 
-## G4. Total transcripts by radial position
+## Total transcripts by radial position
 
 All the panel's genes together. The first two panels are a density, transcripts per 1,000 µm² of the bin,
 which keeps real differences in how much a tubule holds. The third is his normalization: every tubule is
@@ -1228,7 +1228,7 @@ bands = {"centre (bins 0-9)": slice(0, 10), "middle (20-29)": slice(20, 30), "wa
 print("median transcripts per 1,000 µm² by band: " + ", ".join(f"{k} {np.median(transcript_density[:, v]):,.0f}" for k, v in bands.items()))
 ```
 
-## G5. Marker genes by radial position
+## Marker genes by radial position
 
 One marker for each layer. Each tubule's counts are rescaled to the same total, as in his
 `normalize_tube_counts_dict`, then each gene is smoothed as in his `smooth_tube_gene_bin`. Each panel is on its
@@ -1246,10 +1246,10 @@ plt.show()
 ```
 
 
-## G6. Every gene across the radius
+## Every gene across the radius
 
 All the genes at once, to look for spatial patterns not already known. Each gene is one row: its counts across
-the radial bins, averaged over the staged tubules. The counts are normalized and smoothed as in G5 and each
+the radial bins, averaged over the staged tubules. The counts are normalized and smoothed as for the marker genes and each
 compartment is scaled by the tubule's all-transcript factor, as in his notebook, so the inside and the outside
 add up to the total. Each row is then on its own z-score scale, and the genes are sorted by where their counts sit
 across the radius, from the lumen at the top to the wall at the bottom, in the order of the all-transcripts panel.
@@ -1275,7 +1275,7 @@ plt.show()
 print(f"{len(drawn)} of {adata.n_vars} genes have at least {MIN_GENE_TRANSCRIPTS} transcripts in the staged tubules")
 ```
 
-## G7. Every gene around the cycle
+## Every gene around the cycle
 
 The same for the cycle: each gene's counts across the tubules in their ring order, averaged over the radius.
 The genes are sorted by the angle at which their counts sit on the ring, so a gene that peaks at one part of the
