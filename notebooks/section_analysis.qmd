@@ -49,7 +49,7 @@ from spatialdata.transformations import get_transformation
 # Cells under this many transcripts are dropped before dimension reduction (C1).
 LOW_COUNT_CUT = 20
 
-# Phase D: the reference's cell types, germ first, and the colours the figures draw them in.
+# Cell-type annotation: the reference's cell types, germ first, and the colours the figures draw them in.
 GERM = ["SPG", "Scytes", "STids", "Elongating"]
 SOMATIC = ["Sertoli", "Leydig", "Myoid", "Endothelial", "Macrophage", "InnateLymph", "Unknown"]
 CELL_TYPES = GERM + SOMATIC
@@ -64,7 +64,7 @@ TYPE_COLORS = {
 }
 GROUP_COLORS = {"germ": "#d98c1f", "somatic": "#4a7fb5"}
 
-# Phase E: how Alex Vargo flagged each tubule, and the colour its outline is drawn in. A tubule
+# Tubules: how Alex Vargo flagged each tubule, and the colour its outline is drawn in. A tubule
 # is "good" for cells when his cell-to-tubule map can be trusted for it, and a "circle" when its
 # outline is round enough for a radial profile.
 TUBULE_FLAGS = {
@@ -73,7 +73,7 @@ TUBULE_FLAGS = {
 }
 TUBULE_NAVY = "#10105a"
 
-# Phase F: the four stage groups of his computational staging, in order, and the colours they are
+# Tubule stage: the four stage groups of his computational staging, in order, and the colours they are
 # drawn in. Cells are coloured by the stage of the tubule they are in.
 STAGES = [1, 2, 3, 4]
 STAGE_COLORS = {1: "#56B4E9", 2: "#009E73", 3: "#F0E442", 4: "#D55E00"}
@@ -83,7 +83,7 @@ STAGE_CELL_COLORS = {**{f"stage {s}": c for s, c in STAGE_COLORS.items()},
 # stage group 4 meets the start of group 1.
 PHASE_CMAP = "twilight"
 
-# Phase G: a tubule's radial position is binned into this many bins of equal area, and the
+# Radial position: a tubule's radial position is binned into this many bins of equal area, and the
 # heatmaps are smoothed with a Gaussian that wraps across tubules (they sit on a ring) and
 # reflects across bins: sigma in tubules, then in bins.
 N_BINS = 50
@@ -96,7 +96,7 @@ TUBE_LIBRARY_SIZE = 1e6
 # A gene needs this many transcripts in the staged tubules to be drawn among all genes; fewer is noise.
 MIN_GENE_TRANSCRIPTS = 500
 
-# Phase D6: the twelve germ-cell types, coloured along one ramp so neighbours look alike.
+# D6: the twelve germ-cell types, coloured along one ramp so neighbours look alike.
 GC_TYPES = [f"GC{i}" for i in range(1, 13)]
 GC_COLORS = {gc: mcolors.to_hex(plt.cm.turbo(0.05 + 0.9 * i / 11)) for i, gc in enumerate(GC_TYPES)}
 GC_COLORS["not germ"] = "#d9d9d9"
@@ -111,7 +111,7 @@ REFERENCE_DIR = REPO / "results/section_analysis/reference"
 # comma raises unless exactly one matches.
 (TABLE,) = Path(".").glob("*.create_spatialdata_cellpose.h5ad")
 (STORE,) = Path(".").glob("*.create_spatialdata_cellpose.zarr")
-# Phase E: Alex Vargo's tubule outlines, one <id>.npz per tubule in a directory, and the table of
+# Tubules: Alex Vargo's tubule outlines, one <id>.npz per tubule in a directory, and the table of
 # his flags for them. A section's metadata file may be the "-staged" one.
 (TUBULE_BOUNDS,) = Path(".").glob("*tube-bounds")
 (TUBULE_META,) = Path(".").glob("*tubule-metadata*.csv")
@@ -448,7 +448,7 @@ same image and calls, the stage he gave each tubule, where each cell sits betwee
 
 ## B1. Load the section
 
-The table is Phase A's output: raw counts for the 491 panel genes in `X` and per-cell
+The table is the pipeline's output: raw counts for the 491 panel genes in `X` and per-cell
 segmentation metadata in `obs`. The raw counts are copied to a layer, because normalization
 later overwrites `X`.
 
@@ -495,10 +495,10 @@ TISSUE_IMAGE = (dapi, (x0, x1, y1, y0), np.percentile(dapi, [1, 99.7]))
 print(f"{image_name}, level {level}: {dapi.shape[1]} x {dapi.shape[0]} px, {dapi.nbytes / 1e6:.0f} MB")
 ```
 
-# Phase C — Dimension reduction
+# Dimension reduction
 
 One default recipe, run on every section and left untuned. Nothing is clustered: cells are
-annotated one at a time in Phase D, and the UMAP below is for looking at the data.
+annotated one at a time in the cell-type annotation, and the UMAP below is for looking at the data.
 
 ## C1. Filter cells
 
@@ -515,7 +515,7 @@ print(f"kept {adata.n_obs:,} of {n_before:,} cells ({1 - adata.n_obs / n_before:
 ## C2. Normalize
 
 Scale every cell to the section's median total, then take the log. The log-normalized values
-are kept in a layer, because scaling overwrites `X` and the markers in Phase D are read from
+are kept in a layer, because scaling overwrites `X` and the markers in the cell-type annotation are read from
 them.
 
 ```{python}
@@ -550,13 +550,13 @@ sc.pp.neighbors(adata, n_neighbors=15, metric="cosine", random_state=0)
 
 ## C6. UMAP
 
-Not drawn here; Phase D draws it, coloured by the calls.
+Not drawn here; the cell-type annotation draws it, coloured by the calls.
 
 ```{python}
 sc.tl.umap(adata, random_state=0)
 ```
 
-# Phase D — Cell-type annotation
+# Cell-type annotation
 
 Every cell is correlated against a reference and takes the type it correlates with most. The
 first pass stops at germ or somatic: a cell is germ when that type is one of the four germ
@@ -699,7 +699,7 @@ print(adata.obs["germ_type"].value_counts().sort_index().to_string())
 ```
 
 
-# Phase E — Tubules
+# Tubules
 
 Alex Vargo's tubules, drawn over the same image and calls. His outlines were traced from the
 Cellbound3 and DAPI images, not from cells, and each tubule carries his flags: whether the cells
@@ -778,7 +778,7 @@ print(f"{in_tubule.sum():,} of {adata.n_obs:,} cells are in a tubule ({in_tubule
 ```
 
 
-# Phase F — Tubule stage
+# Tubule stage
 
 Each tubule cross-section sits at one point of the cycle of the seminiferous epithelium. The stage
 used here is Alex Vargo's computational one: each tubule's radial gene profile is placed on a ring
@@ -883,7 +883,7 @@ print(f"{np.isfinite(cell_phase).sum():,} of {len(cell_phase):,} cells are in a 
 ```
 
 
-# Phase H — Composition by stage
+# Composition by stage
 
 ## H1. Cell types in a tubule, by stage
 
@@ -991,7 +991,7 @@ for stage in STAGES:
     show_tubule(distance.idxmin(), STAGE_COLORS[stage], f"stage {stage}")
 ```
 
-# Phase G — Radial position
+# Radial position
 
 Where a cell sits between the middle of its tubule and the wall, by Alex Vargo's definition
 (`radialTubule.create_tubule_transcript_polar_info`). It needs only his outlines and the cells, so
